@@ -1,0 +1,65 @@
+# config.yaml — the rules that decide what reaches the digest.
+#
+# Patterns are regular expressions, matched case-insensitively against whole
+# words, so "front ?end" matches "Frontend" and "Front End" but not "storefront".
+# Edit freely, then check the effect with `jobfeed replay --from <dump> --all`.
+
+role:
+  # A title must match at least one of these...
+  include:
+    - 'engineer(ing)?'
+    - developer
+    - swe
+    - sre
+    - backend
+    - platform
+    - infrastructure
+    - member of technical staff     # Anthropic/OpenAI-style SWE titles
+  # ...and none of these.
+  exclude:
+    - 'front ?end'
+    - 'full ?stack'
+    - ui engineer
+    - web developer
+    - manager
+    - director
+    - head of
+    - 'intern(ship)?'
+    - recruiter
+    # Engineer titles that aren't software roles. Delete any you'd want to see.
+    - sales engineer
+    - 'solutions? engineer'
+    - support engineer
+    - mechanical
+    - electrical
+    - hardware
+    - manufacturing
+  # Descriptions heavier in these than in backend_terms get a
+  # "possibly full stack" tag. The posting still goes through.
+  # (Quote any pattern with ? * + [ ] or a backslash in it.)
+  frontend_terms: [react, vue, angular, css, 'next\.js', tailwind, redux, html, frontend, front-end]
+  backend_terms: [golang, rust, java, scala, kotlin, 'c\+\+', python, distributed systems, kafka,
+                  'postgres(ql)?', mysql, kubernetes, grpc, microservices, backend, back-end, infrastructure]
+
+location:
+  # Remote postings pass when their region is one of these. "unknown" is a
+  # remote posting that doesn't say where.
+  remote_regions: [us, americas, global, unknown]
+  # Remote postings that list eligible states must include this one, and
+  # postings that list excluded states must not.
+  home_state: WA
+  # Hybrid and onsite postings need a city from this list (in home_state, or
+  # with no state given).
+  metro: [Seattle, Bellevue, Redmond, Kirkland, Bothell, Issaquah, Renton, Lynnwood]
+
+salary:
+  floor_usd: 150000
+  compare: max          # max: the top of the range must reach the floor; min: the bottom must
+  keep_missing: true    # true: postings with no USD salary go to "No salary listed"; false: dropped
+
+seniority:
+  # Sort order within each digest section. Never used to drop anything.
+  prefer: [senior, staff]
+
+digest:
+  max_per_section: 50

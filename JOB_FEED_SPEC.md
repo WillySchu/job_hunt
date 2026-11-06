@@ -116,8 +116,8 @@ A posting reaches the digest only if it passes role, location and salary in that
 
 **1. Role**
 
-- The title must match an include pattern: engineer, developer, SWE, SRE, backend, platform, infrastructure, data or ML engineer.
-- The title is dropped if it matches an exclude pattern: front end, frontend, full stack, fullstack, UI engineer, web developer, plus manager, director and intern.
+- The title must match an include pattern: engineer or engineering, developer, SWE, SRE, backend, platform, infrastructure, or member of technical staff.
+- The title is dropped if it matches an exclude pattern: front end, frontend, full stack, fullstack, UI engineer, web developer, plus manager, director, head of, intern and recruiter, and engineer titles that aren't software roles (sales, solutions and support engineer; mechanical, electrical, hardware, manufacturing).
 - Generic titles such as "Software Engineer" pass, but the description is checked for frontend-heavy terms (React, Vue, Angular, CSS, Next.js). If they outnumber backend terms, the posting gets a "possibly full stack" tag instead of being dropped.
 
 **2. Location**
@@ -127,6 +127,7 @@ A posting reaches the digest only if it passes role, location and salary in that
 - Some US-remote roles list eligible states. If a list is present and Washington is not on it, the posting is dropped.
 - Hybrid and onsite pass only when a listed city is in the Seattle-area set: Seattle, Bellevue, Redmond, Kirkland, Bothell, Issaquah, Renton and Lynnwood.
 - An unclear work mode passes if the location text names "remote" or a Seattle-area city; otherwise it is dropped.
+- A remote posting that fails these checks still passes if it also lists a Seattle-area office.
 
 **3. Salary**
 
@@ -139,13 +140,14 @@ A posting reaches the digest only if it passes role, location and salary in that
 
 Seniority is parsed from title words: Senior, Sr, Staff, Principal and level numerals like II or III. Senior roles sort first within each section, then Staff, then the rest.
 
-All rules live in `config.yaml`, so you can tune them without touching code:
+All rules live in `config.yaml`, so you can tune them without touching code. The repo's copy is commented setting by setting; in short:
 
 ```yaml
 role:
-  include: [engineer, developer, swe, sre, backend, platform, infrastructure]
-  exclude: [front ?end, full ?stack, ui engineer, web developer, manager, director, intern]
-  frontend_terms: [react, vue, angular, css, next.js, tailwind]
+  include: ['engineer(ing)?', developer, swe, sre, backend, platform, infrastructure, member of technical staff]
+  exclude: ['front ?end', 'full ?stack', ui engineer, web developer, manager, director, head of, 'intern(ship)?', recruiter, ...]
+  frontend_terms: [react, vue, angular, css, 'next\.js', tailwind, ...]
+  backend_terms: [golang, rust, java, kafka, postgres, kubernetes, ...]
 location:
   remote_regions: [us, americas, global, unknown]
   home_state: WA
@@ -156,7 +158,11 @@ salary:
   keep_missing: true    # route to "No salary listed"
 seniority:
   prefer: [senior, staff]
+digest:
+  max_per_section: 50
 ```
+
+`jobfeed replay` re-runs the current rules over saved postings, so a rule change can be checked without refetching.
 
 ## Digest email
 
@@ -221,7 +227,7 @@ The tool is a plain Python 3.11+ package in a virtualenv, run once a day by your
 Eight milestones, each ending in something you can run. Milestones 1–7 can be built and tested on a laptop; only milestone 8 needs the Pi.
 
 - [x] **1. Skeleton and Greenhouse.** `Job` model, Greenhouse adapter, `run --dry-run` printing raw postings. Done when it lists jobs for three test companies.
-- [ ] **2. Normalizers.** Location, salary and seniority parsing, with unit tests built from 50+ real location and salary strings.
+- [x] **2. Normalizers.** Location, salary and seniority parsing, with unit tests built from 50+ real location and salary strings.
 - [ ] **3. Filters.** Rules read from `config.yaml`, plus the `replay` command.
 - [ ] **4. Store and dedupe.** `jobs.db`, `first_seen` and `emailed_at` tracking, and the 30-day cross-source dedupe.
 - [ ] **5. Lever, Ashby and discover.** Two more adapters and the `discover` command, then discover run on the starter names in the Seed list section.

@@ -1,23 +1,28 @@
-"""Command-line entry point: `jobfeed run --dry-run` and friends."""
+"""Command-line entry point: `jobfeed run --dry-run`, `jobfeed replay`."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+from datetime import date
 from pathlib import Path
 from typing import TextIO
 
 import httpx
 
 from jobfeed import __version__
-from jobfeed.companies import DEFAULT_PATH, load_companies
+from jobfeed.companies import DEFAULT_PATH as COMPANIES_PATH
+from jobfeed.companies import load_companies
+from jobfeed.config import DEFAULT_PATH as CONFIG_PATH
+from jobfeed.config import Config, ConfigError, load_config
+from jobfeed.filters import SECTION_ORDER, SECTION_TITLES, WATCHLIST, Digest, Entry, build_digest
 from jobfeed.http import make_client
 from jobfeed.models import Job
 from jobfeed.normalize import format_salary
 from jobfeed.sources import SOURCES, Board, FetchResult, fetch_all
 
-DEFAULT_TEXT_LIMIT = 25
+MAX_LOCATION_CHARS = 70
 
 
 def _parse_board(spec: str) -> Board:
@@ -35,8 +40,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"jobfeed {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    run = sub.add_parser("run", help="fetch postings (only --dry-run works so far)")
-    run.add_argument("--dry-run", action="store_true", help="print postings and write nothing")
+    shared = argparse.ArgumentParser(add_help=False)
+    shared.add_argument("--config", type=Path, default=CONFIG_PATH, help="path to config.yaml")
+    shared.add_argument("--companies", type=Path, default=COMPANIES_PATH, help="path to companies.yaml")
+    shared.add_argument("--all", action="store_true", help="also list dropped postings and why")
+    shared.add_argument("--limit", type=int, default=None,
+                        help="postings per section (default: digest.max_per_section; 0 = all)")
+
+    run = sub.add_parser("run", parents=[shared], help="fetch and filter postings (only --dry-run works so far)")
+    run.add_argument("--dry-run", action="store_true", help="print the digest and write nothing")
     run.add_argument(
         "--board",
         action="append",
@@ -44,73 +56,89 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SOURCE:SLUG",
         help="poll this board instead of companies.yaml; repeatable (e.g. greenhouse:anthropic)",
     )
-    run.add_argument("--companies", type=Path, default=DEFAULT_PATH, help="path to companies.yaml")
-    run.add_argument("--json", action="store_true", help="print one JSON Job per line")
-    run.add_argument(
-        "--limit",
-        type=int,
-        default=None,
-        help=f"postings shown per board (text default {DEFAULT_TEXT_LIMIT}, JSON default all; 0 = all)",
-    )
+    run.add_argument("--json", action="store_true",
+                     help="print every fetched posting as one JSON Job per line, unfiltered (input for replay)")
+
+    replay = sub.add_parser("replay", parents=[shared], help="re-run the current filters over saved postings")
+    replay.add_argument("--from", dest="source_file", type=Path, metavar="FILE",
+                        help="a `run --dry-run --json` dump (jobs.db becomes the default in milestone 4)")
 
     sub.add_parser("discover", help="find each company's ATS (coming in milestone 5)")
-    sub.add_parser("replay", help="re-run filters over stored postings (coming in milestone 3)")
     return parser
 
 
-def describe(job: Job) -> str:
-    """One line of what the normalizers read: 'remote (us) · Seattle, WA · $170K–$215K · senior'."""
-    mode = job.work_mode
-    if mode == "remote":
-        mode += f" ({job.remote_region or 'region unstated'})"
-    parts = [mode]
-    if job.cities:
-        parts.append("; ".join(job.cities[:4]) + (f" +{len(job.cities) - 4}" if len(job.cities) > 4 else ""))
-    if job.remote_states:
-        parts.append("states: " + ", ".join(job.remote_states))
-    if job.excluded_states:
-        parts.append("not in: " + ", ".join(job.excluded_states))
+# --- rendering -------------------------------------------------------------
+
+def _pay(job: Job) -> str:
     if job.salary_min is not None or job.salary_max is not None:
-        parts.append(format_salary(job.salary_min, job.salary_max))
-    elif job.salary_raw:
-        parts.append(f"{job.salary_raw} ({job.salary_currency}, not compared)")
-    else:
-        parts.append("no salary listed")
-    parts.append(job.seniority or "level unstated")
-    return " · ".join(parts)
+        return format_salary(job.salary_min, job.salary_max)
+    if job.salary_raw:
+        return f"{job.salary_raw} ({job.salary_currency}, not compared)"
+    return "no salary listed"
 
 
-def _print_text(results: list[FetchResult], limit: int, out: TextIO) -> None:
-    for result in results:
-        board = result.board
-        if not result.ok:
+def _mode(job: Job) -> str:
+    if job.work_mode == "remote":
+        return f"remote ({job.remote_region or 'region unstated'})"
+    return job.work_mode
+
+
+def _location(job: Job) -> str:
+    loc = job.location_raw or "no location given"
+    return loc if len(loc) <= MAX_LOCATION_CHARS else loc[: MAX_LOCATION_CHARS - 1] + "…"
+
+
+def _entry_lines(entry: Entry) -> list[str]:
+    job = entry.job
+    head = f"{job.title} — {job.company} · {_location(job)} · {_pay(job)}"
+    if job.seniority:
+        head += f" · {job.seniority.title()}"
+    detail = [_mode(job)]
+    if job.remote_states:
+        detail.append("states: " + ", ".join(job.remote_states))
+    detail += entry.verdict.tags
+    detail.append(f"via {job.source.title()}")
+    if job.posted_at:
+        detail.append(f"posted {job.posted_at.date().isoformat()}")
+    return [f"  {head}", f"      {' · '.join(detail)}", f"      {job.url}"]
+
+
+def render_digest(digest: Digest, *, show_dropped: bool, today: date, out: TextIO) -> None:
+    watch_count = len(digest.sections[WATCHLIST]) + digest.hidden.get(WATCHLIST, 0)
+    print(f"Job feed · {today.strftime('%a %b')} {today.day} · {digest.matched} new ({watch_count} watchlist)",
+          file=out)
+    if not digest.matched:
+        print("\nNothing new matched.", file=out)
+    for name in SECTION_ORDER:
+        entries = digest.sections[name]
+        hidden = digest.hidden.get(name, 0)
+        if not entries:
             continue
-        company = result.jobs[0].company if result.jobs else (board.company or board.slug)
-        print(f"\n== {company} ({board.label}) · {len(result.jobs)} postings", file=out)
-        jobs = sorted(result.jobs, key=lambda j: j.posted_at.timestamp() if j.posted_at else 0, reverse=True)
-        shown = jobs if limit == 0 else jobs[:limit]
-        for job in shown:
-            posted = job.posted_at.date().isoformat() if job.posted_at else "????-??-??"
-            print(f"  {posted}  {job.title}", file=out)
-            print(f"              {job.location_raw or '(no location)'}", file=out)
-            print(f"              → {describe(job)}", file=out)
-            print(f"              {job.url}", file=out)
-        hidden = len(jobs) - len(shown)
-        if hidden > 0:
-            print(f"  … {hidden} more (use --limit 0 to show all)", file=out)
+        print(f"\n== {SECTION_TITLES[name]} ({len(entries) + hidden})", file=out)
+        for entry in entries:
+            print("\n".join(_entry_lines(entry)), file=out)
+        if hidden:
+            print(f"  … {hidden} more not shown (raise digest.max_per_section or use --limit 0)", file=out)
+    if show_dropped and digest.dropped:
+        print(f"\n== Dropped ({len(digest.dropped)})", file=out)
+        for entry in sorted(digest.dropped, key=lambda e: (e.verdict.stage or "", e.job.company, e.job.title)):
+            job = entry.job
+            print(f"  {entry.verdict.stage:<8}  {job.title} — {job.company} · {_location(job)}", file=out)
+            print(f"            {entry.verdict.reason}", file=out)
 
 
-def _print_json(results: list[FetchResult], limit: int, out: TextIO) -> None:
-    for result in results:
-        jobs = result.jobs if limit == 0 else result.jobs[:limit]
-        for job in jobs:
-            print(json.dumps(job.to_dict(), ensure_ascii=False), file=out)
+def _drop_summary(digest: Digest) -> str:
+    counts: dict[str, int] = {}
+    for e in digest.dropped:
+        counts[e.verdict.stage or "?"] = counts.get(e.verdict.stage or "?", 0) + 1
+    parts = ", ".join(f"{stage} {counts[stage]}" for stage in ("role", "location", "salary") if stage in counts)
+    return f"{len(digest.dropped)} dropped" + (f" ({parts})" if parts else "")
 
 
-def _print_summary(results: list[FetchResult], err: TextIO) -> None:
+def _print_fetch_summary(results: list[FetchResult], err: TextIO) -> None:
     ok = [r for r in results if r.ok]
     total = sum(len(r.jobs) for r in ok)
-    print(f"\n{len(results)} boards · {len(ok)} ok · {len(results) - len(ok)} failed · {total} postings", file=err)
+    print(f"{len(results)} boards · {len(ok)} ok · {len(results) - len(ok)} failed · {total} postings", file=err)
     for r in results:
         if not r.ok:
             print(f"  FAILED {r.board.label}: {r.error}", file=err)
@@ -118,17 +146,47 @@ def _print_summary(results: list[FetchResult], err: TextIO) -> None:
             print(f"  EMPTY  {r.board.label}: board has no open postings", file=err)
 
 
-def cmd_run(args: argparse.Namespace, transport: httpx.BaseTransport | None, out: TextIO, err: TextIO) -> int:
+# --- commands --------------------------------------------------------------
+
+def _load_config(path: Path, err: TextIO) -> Config | None:
+    try:
+        return load_config(path)
+    except ConfigError as exc:
+        print(f"config error: {exc}", file=err)
+        return None
+
+
+def _apply_limit(config: Config, limit: int | None) -> None:
+    if limit is not None:
+        config.digest.max_per_section = limit if limit > 0 else 10**9
+
+
+def _watched(companies_path: Path, boards: list[Board]) -> set[str]:
+    names = {c.name.casefold() for c in load_companies(companies_path).companies if c.watch}
+    return names | {b.company.casefold() for b in boards if b.watch and b.company}
+
+
+def _finish(digest: Digest, args: argparse.Namespace, out: TextIO, err: TextIO, today: date) -> None:
+    render_digest(digest, show_dropped=args.all, today=today, out=out)
+    print(f"{digest.matched} matched · {_drop_summary(digest)}"
+          + ("" if args.all else " (add --all to see why)" if digest.dropped else ""), file=err)
+
+
+def cmd_run(args: argparse.Namespace, transport: httpx.BaseTransport | None, out: TextIO, err: TextIO,
+            today: date) -> int:
     if not args.dry_run:
         print("Only `jobfeed run --dry-run` works until the store and email are built "
               "(milestones 4 and 7). Nothing was fetched.", file=err)
         return 2
+    config = _load_config(args.config, err)
+    if config is None:
+        return 2
+    _apply_limit(config, args.limit)
 
     if args.board:
         boards = args.board
     else:
-        companies = load_companies(args.companies)
-        boards = [b for b in companies.boards() if b.source in SOURCES]
+        boards = [b for b in load_companies(args.companies).boards() if b.source in SOURCES]
         if not boards:
             print(f"No boards to poll: no company in {args.companies} has `ats` and `slug` filled in "
                   "for a supported source yet (`discover` arrives in milestone 5).\n"
@@ -137,13 +195,52 @@ def cmd_run(args: argparse.Namespace, transport: httpx.BaseTransport | None, out
 
     with make_client(transport) as client:
         results = fetch_all(client, boards)
+    jobs = [job for r in results if r.ok for job in r.jobs]
 
     if args.json:
-        _print_json(results, 0 if args.limit is None else args.limit, out)
-    else:
-        _print_text(results, DEFAULT_TEXT_LIMIT if args.limit is None else args.limit, out)
-    _print_summary(results, err)
+        for job in jobs:
+            print(json.dumps(job.to_dict(), ensure_ascii=False), file=out)
+        _print_fetch_summary(results, err)
+        return 0 if any(r.ok for r in results) else 1
+
+    digest = build_digest(jobs, config, watched=_watched(args.companies, boards))
+    _finish(digest, args, out, err, today)
+    _print_fetch_summary(results, err)
     return 0 if any(r.ok for r in results) else 1
+
+
+def read_jobs(path: Path) -> list[Job]:
+    jobs = []
+    for n, line in enumerate(path.read_text().splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            jobs.append(Job.from_dict(json.loads(line)))
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"{path}:{n} isn't a Job record ({exc})") from exc
+    return jobs
+
+
+def cmd_replay(args: argparse.Namespace, out: TextIO, err: TextIO, today: date) -> int:
+    if args.source_file is None:
+        print("Replay reads jobs.db once the store exists (milestone 4). Until then, save postings with\n"
+              "  jobfeed run --dry-run --json --board greenhouse:SLUG > postings.jsonl\n"
+              "and replay them with\n"
+              "  jobfeed replay --from postings.jsonl", file=err)
+        return 2
+    config = _load_config(args.config, err)
+    if config is None:
+        return 2
+    _apply_limit(config, args.limit)
+    try:
+        jobs = read_jobs(args.source_file)
+    except (OSError, ValueError) as exc:
+        print(f"can't read postings: {exc}", file=err)
+        return 2
+    digest = build_digest(jobs, config, watched=_watched(args.companies, []))
+    _finish(digest, args, out, err, today)
+    print(f"{len(jobs)} postings replayed from {args.source_file}", file=err)
+    return 0
 
 
 def main(
@@ -152,14 +249,17 @@ def main(
     transport: httpx.BaseTransport | None = None,
     out: TextIO | None = None,
     err: TextIO | None = None,
+    today: date | None = None,
 ) -> int:
     out = out or sys.stdout
     err = err or sys.stderr
+    today = today or date.today()
     args = build_parser().parse_args(argv)
     if args.command == "run":
-        return cmd_run(args, transport, out, err)
-    milestone = {"discover": 5, "replay": 3}[args.command]
-    print(f"`jobfeed {args.command}` isn't built yet (milestone {milestone}).", file=err)
+        return cmd_run(args, transport, out, err, today)
+    if args.command == "replay":
+        return cmd_replay(args, out, err, today)
+    print(f"`jobfeed {args.command}` isn't built yet (milestone 5).", file=err)
     return 2
 
 
