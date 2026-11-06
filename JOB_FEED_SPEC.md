@@ -108,7 +108,7 @@ CREATE TABLE jobs (
 CREATE INDEX jobs_dedupe ON jobs(dedupe_key);
 ```
 
-The same role often appears on an aggregator and on the company's own board. A posting is skipped when another row with the same `dedupe_key` was emailed in the last 30 days, and the ATS copy wins when both arrive together.
+The same role often appears on an aggregator and on the company's own board. A posting is skipped when another row with the same `dedupe_key` was emailed in the last 30 days, and the ATS copy wins when both arrive together. The key ignores company suffixes (Inc, Labs) and location tags aggregators add to titles ("(Remote)", "- Remote US"), so the same title at two offices of one company is also one role.
 
 ## Filters
 
@@ -228,7 +228,7 @@ Eight milestones, each ending in something you can run. Milestones 1–7 can be 
 
 - [x] **1. Skeleton and Greenhouse.** `Job` model, Greenhouse adapter, `run --dry-run` printing raw postings. Done when it lists jobs for three test companies.
 - [x] **2. Normalizers.** Location, salary and seniority parsing, with unit tests built from 50+ real location and salary strings.
-- [ ] **3. Filters.** Rules read from `config.yaml`, plus the `replay` command.
+- [x] **3. Filters.** Rules read from `config.yaml`, plus the `replay` command.
 - [ ] **4. Store and dedupe.** `jobs.db`, `first_seen` and `emailed_at` tracking, and the 30-day cross-source dedupe.
 - [ ] **5. Lever, Ashby and discover.** Two more adapters and the `discover` command, then discover run on the starter names in the Seed list section.
 - [ ] **6. Aggregators.** Remotive, RemoteOK and Himalayas adapters, with their attribution links kept, plus slug harvesting from their apply links.
