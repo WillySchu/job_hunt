@@ -1,0 +1,61 @@
+[
+  {
+    "id": "a1b2c3d4-0001",
+    "text": "Senior Backend Engineer",
+    "hostedUrl": "https://jobs.lever.co/leverco/a1b2c3d4-0001",
+    "applyUrl": "https://jobs.lever.co/leverco/a1b2c3d4-0001/apply",
+    "createdAt": 1761750000000,
+    "country": "US",
+    "workplaceType": "remote",
+    "categories": {
+      "commitment": "Full-time",
+      "department": "Engineering",
+      "location": "United States",
+      "team": "Platform",
+      "allLocations": ["United States"]
+    },
+    "descriptionPlain": "We run payments infrastructure in Go and Postgres.",
+    "description": "<div>We run payments infrastructure in Go and Postgres.</div>",
+    "lists": [
+      { "text": "What you'll do", "content": "<li>Own the ledger service</li><li>Run Kafka</li>" }
+    ],
+    "additionalPlain": "We can hire in the following states: CA, CO, NY, WA.",
+    "salaryRange": { "currency": "USD", "interval": "per-year-salary", "min": 175000, "max": 215000 },
+    "salaryDescriptionPlain": "Base pay varies by location."
+  },
+  {
+    "id": "a1b2c3d4-0002",
+    "text": "Staff Infrastructure Engineer",
+    "hostedUrl": "https://jobs.lever.co/leverco/a1b2c3d4-0002",
+    "createdAt": 1762300000000,
+    "country": "US",
+    "workplaceType": "hybrid",
+    "categories": {
+      "location": "Seattle, WA",
+      "allLocations": ["Seattle, WA", "Bellevue, WA"]
+    },
+    "description": "<p>Kubernetes at scale.</p>",
+    "additional": "<p>The salary range for this role is $190,000 - $240,000.</p>"
+  },
+  {
+    "id": "a1b2c3d4-0003",
+    "text": "Platform Engineer",
+    "hostedUrl": "https://jobs.lever.co/leverco/a1b2c3d4-0003",
+    "createdAt": 1762000000000,
+    "country": "CA",
+    "workplaceType": "onsite",
+    "categories": { "location": "Toronto", "allLocations": ["Toronto"] },
+    "descriptionPlain": "Toronto office.",
+    "salaryRange": { "currency": "CAD", "interval": "per-year-salary", "min": 150000, "max": 180000 }
+  },
+  {
+    "id": "a1b2c3d4-0004",
+    "text": "Backend Contractor",
+    "hostedUrl": "https://jobs.lever.co/leverco/a1b2c3d4-0004",
+    "createdAt": 1762100000000,
+    "workplaceType": "unspecified",
+    "categories": { "location": "Remote" },
+    "descriptionPlain": "Contract role.",
+    "salaryRange": { "currency": "USD", "interval": "per-hour-wage", "min": 90, "max": 110 }
+  }
+]

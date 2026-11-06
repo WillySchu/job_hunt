@@ -1,4 +1,4 @@
-"""Command-line entry point: `jobfeed run`, `jobfeed replay`."""
+"""Command-line entry point: `jobfeed run`, `jobfeed replay`, `jobfeed discover`."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from jobfeed.companies import load_companies
 from jobfeed.config import DEFAULT_PATH as CONFIG_PATH
 from jobfeed.config import Config, ConfigError, load_config
 from jobfeed.dedupe import Plan, plan_run
+from jobfeed.discover import Discovery, EditError, discover_all, update_companies_file
 from jobfeed.filters import SECTION_ORDER, SECTION_TITLES, WATCHLIST, Digest, Entry
 from jobfeed.http import make_client
 from jobfeed.models import Job
@@ -72,7 +73,13 @@ def build_parser() -> argparse.ArgumentParser:
     replay.add_argument("--days", type=int, default=None,
                         help="only postings seen on a board in the last N days (jobs.db only)")
 
-    sub.add_parser("discover", help="find each company's ATS (coming in milestone 5)")
+    discover = sub.add_parser("discover", help="find which ATS each company uses and write it to companies.yaml")
+    discover.add_argument("names", nargs="*", metavar="NAME",
+                          help="companies to look up (default: every company in companies.yaml without an ats)")
+    discover.add_argument("--companies", type=Path, default=COMPANIES_PATH, help="path to companies.yaml")
+    discover.add_argument("--retry", action="store_true",
+                          help="also re-check companies already marked `ats: unsupported`")
+    discover.add_argument("--dry-run", action="store_true", help="print what was found and change nothing")
     return parser
 
 
@@ -296,6 +303,68 @@ def cmd_replay(args: argparse.Namespace, out: TextIO, err: TextIO, today: date, 
     return 0
 
 
+def _discovery_line(d: Discovery, width: int) -> str:
+    if d.error:
+        return f"  {d.name:<{width}}  ?  couldn't check: {d.error}"
+    if not d.found:
+        tried = ", ".join(sorted({t.partition(":")[2] for t in d.tried}))
+        return f"  {d.name:<{width}}  -  not on Greenhouse, Lever or Ashby (tried {tried})"
+    line = f"  {d.name:<{width}}  ✓  {d.ats}:{d.slug} · {d.postings} postings"
+    return line + "".join(f"\n  {'':<{width}}     check: {w}" for w in d.warnings)
+
+
+def cmd_discover(args: argparse.Namespace, transport: httpx.BaseTransport | None, out: TextIO,
+                 err: TextIO) -> int:
+    try:
+        companies = load_companies(args.companies)
+    except ValueError as exc:
+        print(f"can't read {args.companies}: {exc}", file=err)
+        return 2
+    if args.names:
+        names = list(dict.fromkeys(args.names))
+    else:
+        names = [c.name for c in companies.companies
+                 if c.ats is None or (args.retry and c.ats == "unsupported")]
+        if not names:
+            print(f"Every company in {args.companies} already has an ats"
+                  + ("" if args.retry else " (add --retry to re-check the unsupported ones)") + ".", file=err)
+            return 0
+
+    print(f"Checking {len(names)} companies on Greenhouse, Lever and Ashby…", file=err)
+    with make_client(transport) as client:
+        found = discover_all(client, names)
+
+    width = min(max(len(n) for n in names), 28)
+    for d in sorted(found, key=lambda d: (d.error is not None, not d.found, d.name.casefold())):
+        print(_discovery_line(d, width), file=out)
+
+    hits = [d for d in found if d.found]
+    by_ats = {a: sum(1 for d in hits if d.ats == a) for a in SOURCES}
+    misses = sum(1 for d in found if not d.found and not d.error)
+    errors = sum(1 for d in found if d.error)
+    checks = sum(1 for d in hits if d.warnings)
+    parts = [f"{len(found)} checked", f"{len(hits)} found ("
+             + ", ".join(f"{n} {a}" for a, n in by_ats.items() if n) + ")" if hits else "0 found",
+             f"{misses} unsupported"]
+    if errors:
+        parts.append(f"{errors} couldn't be checked (left as they were)")
+    if checks:
+        parts.append(f"{checks} worth a look (see 'check:')")
+    print("\n" + " · ".join(parts), file=out)
+
+    if args.dry_run:
+        print("Dry run: companies.yaml not changed.", file=err)
+    else:
+        try:
+            added = update_companies_file(args.companies, found)
+        except (EditError, OSError) as exc:
+            print(f"companies.yaml not changed: {exc}", file=err)
+            return 2
+        note = f" (added {len(added)} new: {', '.join(added)})" if added else ""
+        print(f"Updated {args.companies}{note}; the previous version is in {args.companies.name}.bak", file=err)
+    return 1 if found and errors == len(found) else 0
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -313,8 +382,7 @@ def main(
         return cmd_run(args, transport, out, err, today, now)
     if args.command == "replay":
         return cmd_replay(args, out, err, today, now)
-    print(f"`jobfeed {args.command}` isn't built yet (milestone 5).", file=err)
-    return 2
+    return cmd_discover(args, transport, out, err)
 
 
 if __name__ == "__main__":

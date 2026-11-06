@@ -1,0 +1,75 @@
+{
+  "apiVersion": "1",
+  "jobs": [
+    {
+      "id": "9f1e0000-0001",
+      "title": "Senior Software Engineer, Data Platform",
+      "department": "Engineering",
+      "team": "Data",
+      "employmentType": "FullTime",
+      "location": "Seattle",
+      "secondaryLocations": [
+        { "location": "San Francisco", "address": { "postalAddress": { "addressLocality": "San Francisco" } } }
+      ],
+      "publishedAt": "2026-10-20T14:02:11.000Z",
+      "isListed": true,
+      "isRemote": false,
+      "workplaceType": "Hybrid",
+      "address": { "postalAddress": { "addressLocality": "Seattle", "addressRegion": "WA", "addressCountry": "United States" } },
+      "jobUrl": "https://jobs.ashbyhq.com/ashbyco/9f1e0000-0001",
+      "applyUrl": "https://jobs.ashbyhq.com/ashbyco/9f1e0000-0001/application",
+      "descriptionHtml": "<p>Spark and Kafka pipelines.</p>",
+      "descriptionPlain": "Spark and Kafka pipelines.",
+      "compensation": {
+        "compensationTierSummary": "$180K – $230K • Offers Equity",
+        "scrapeableCompensationSalarySummary": "$180K - $230K",
+        "compensationTiers": [],
+        "summaryComponents": [
+          { "compensationType": "Salary", "interval": "1 YEAR", "currencyCode": "USD", "minValue": 180000, "maxValue": 230000 },
+          { "compensationType": "EquityPercentage", "interval": "NONE", "minValue": 0.01, "maxValue": 0.05 }
+        ]
+      }
+    },
+    {
+      "id": "9f1e0000-0002",
+      "title": "Backend Engineer",
+      "location": "Remote",
+      "secondaryLocations": [],
+      "publishedAt": "2026-11-02T09:00:00.000Z",
+      "isListed": true,
+      "isRemote": true,
+      "workplaceType": "Remote",
+      "address": { "postalAddress": { "addressCountry": "United States" } },
+      "jobUrl": "https://jobs.ashbyhq.com/ashbyco/9f1e0000-0002",
+      "descriptionHtml": "<p>Rust services.</p>",
+      "compensation": {
+        "compensationTierSummary": "$150K – $185K",
+        "summaryComponents": []
+      }
+    },
+    {
+      "id": "9f1e0000-0003",
+      "title": "Senior Engineer (London)",
+      "location": "London",
+      "publishedAt": "2026-11-01T09:00:00.000Z",
+      "isListed": true,
+      "isRemote": false,
+      "workplaceType": "OnSite",
+      "address": { "postalAddress": { "addressCountry": "United Kingdom" } },
+      "jobUrl": "https://jobs.ashbyhq.com/ashbyco/9f1e0000-0003",
+      "descriptionPlain": "London office.",
+      "compensation": {
+        "summaryComponents": [
+          { "compensationType": "Salary", "interval": "1 YEAR", "currencyCode": "GBP", "minValue": 90000, "maxValue": 120000 }
+        ]
+      }
+    },
+    {
+      "id": "9f1e0000-0004",
+      "title": "Unlisted Role",
+      "location": "Seattle",
+      "isListed": false,
+      "jobUrl": "https://jobs.ashbyhq.com/ashbyco/9f1e0000-0004"
+    }
+  ]
+}

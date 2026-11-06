@@ -9,11 +9,17 @@ import httpx
 from jobfeed.http import FetchError, NotFound
 from jobfeed.normalize import normalize_job
 from jobfeed.sources.base import Board, FetchResult, Source
+from jobfeed.sources.ashby import AshbySource
 from jobfeed.sources.greenhouse import GreenhouseSource
+from jobfeed.sources.lever import LeverSource
 
+# Order matters to `discover`: boards are probed in this order.
 SOURCES: dict[str, Source] = {
     "greenhouse": GreenhouseSource(),
+    "lever": LeverSource(),
+    "ashby": AshbySource(),
 }
+ATS_SOURCES = ["greenhouse", "lever", "ashby"]
 
 MAX_CONCURRENCY = 4
 
@@ -38,4 +44,4 @@ def fetch_all(client: httpx.Client, boards: list[Board]) -> list[FetchResult]:
         return list(pool.map(lambda b: fetch_board(client, b), boards))
 
 
-__all__ = ["Board", "FetchResult", "SOURCES", "fetch_all", "fetch_board"]
+__all__ = ["ATS_SOURCES", "Board", "FetchResult", "SOURCES", "fetch_all", "fetch_board"]

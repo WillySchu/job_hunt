@@ -41,3 +41,7 @@ class Source(Protocol):
     def fetch(self, client: httpx.Client, board: Board) -> list[Job]:
         """Return every open posting on the board. Raise on failure."""
         ...
+
+    def probe(self, client: httpx.Client, slug: str) -> tuple[int, str | None]:
+        """Cheaply check a slug: (open postings, display name if the source has one). Raise NotFound."""
+        ...

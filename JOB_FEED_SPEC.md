@@ -36,7 +36,7 @@ v1 reads six free, keyless JSON sources. Three are remote-job aggregators that n
 
 The HN "Who's Hiring" thread (monthly, via the [HN Algolia API](https://hn.algolia.com/api)) is a stretch goal for v1. Its posts are free text, so it needs an LLM or a loose parser to extract fields.
 
-**Seed list.** The ATS APIs do not list their customers, so the tool keeps a `companies.yaml` of company slugs. A one-time `discover` command takes plain company names and tries each ATS endpoint to find which one answers. A few hundred boards a day is light work for the Pi at a polite concurrency of 4 requests.
+**Seed list.** The ATS APIs do not list their customers, so the tool keeps a `companies.yaml` of company slugs. A one-time `discover` command takes plain company names and tries each ATS endpoint to find which one answers. It tries a few slug spellings per name, prefers a board with open postings, flags matches worth a second look (a shortened name, a differently named board, an empty board) and edits `companies.yaml` in place. A few hundred boards a day is light work for the Pi at a polite concurrency of 4 requests.
 
 **Watchlist.** Any company in `companies.yaml` can carry `watch: true`. Its matches are listed first in the digest and are never dropped for a missing salary.
 
@@ -229,7 +229,7 @@ Eight milestones, each ending in something you can run. Milestones 1–7 can be 
 - [x] **1. Skeleton and Greenhouse.** `Job` model, Greenhouse adapter, `run --dry-run` printing raw postings. Done when it lists jobs for three test companies.
 - [x] **2. Normalizers.** Location, salary and seniority parsing, with unit tests built from 50+ real location and salary strings.
 - [x] **3. Filters.** Rules read from `config.yaml`, plus the `replay` command.
-- [ ] **4. Store and dedupe.** `jobs.db`, `first_seen` and `emailed_at` tracking, and the 30-day cross-source dedupe.
+- [x] **4. Store and dedupe.** `jobs.db`, `first_seen` and `emailed_at` tracking, and the 30-day cross-source dedupe.
 - [ ] **5. Lever, Ashby and discover.** Two more adapters and the `discover` command, then discover run on the starter names in the Seed list section.
 - [ ] **6. Aggregators.** Remotive, RemoteOK and Himalayas adapters, with their attribution links kept, plus slug harvesting from their apply links.
 - [ ] **7. Email.** HTML and text digest sent through Gmail; first real send to yourself.

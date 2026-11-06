@@ -9,8 +9,8 @@ A daily email digest of new software engineering postings that are remote or in 
 | 1. Skeleton and Greenhouse | **Done** — `Job` model, Greenhouse adapter, `run --dry-run` |
 | 2. Normalizers | **Done** — location, salary and seniority parsing |
 | 3. Filters | **Done** — rules from `config.yaml`, digest preview, `replay` |
-| 4. Store and dedupe | **Built** — `jobs.db`, sent tracking, 30-day cross-source dedupe |
-| 5. Lever, Ashby and discover | Not started |
+| 4. Store and dedupe | **Done** — `jobs.db`, sent tracking, 30-day cross-source dedupe |
+| 5. Lever, Ashby and discover | **Built** — two more adapters; `discover` fills in `companies.yaml` |
 | 6. Aggregators | Not started |
 | 7. Email | Not started |
 | 8. Deploy | Not started |
@@ -63,13 +63,35 @@ Options:
 
 Counts, drop totals and board failures go to stderr, so redirecting stdout captures only the digest or the JSON.
 
-The board slug is the part after `/boards/` in a company's Greenhouse URL. A wrong slug shows up as `FAILED greenhouse:SLUG: board not found` and doesn't stop the other boards.
+`--board` takes `greenhouse:SLUG`, `lever:SLUG` or `ashby:SLUG`. The slug is the company's part of its board URL: `job-boards.greenhouse.io/SLUG`, `jobs.lever.co/SLUG`, `jobs.ashbyhq.com/SLUG`. A wrong slug shows up as `FAILED lever:SLUG: board not found` and doesn't stop the other boards.
 
-Without `--board`, `run` polls every company in `companies.yaml` that has `ats: greenhouse` and a `slug`. `jobfeed discover` will fill those in at milestone 5. Until then you can add a few by hand:
+Without `--board`, `run` polls every company in `companies.yaml` that has an `ats` and a `slug`; `discover` fills those in.
 
-```yaml
-  - { name: Stripe, bucket: seattle-hiring, origin: seed, ats: greenhouse, slug: stripe, watch: true }
+### Find each company's board
+
+```sh
+.venv/bin/jobfeed discover               # every company in companies.yaml without an ats yet
+.venv/bin/jobfeed discover Datadog Figma # look up these, adding any that are new
+.venv/bin/jobfeed discover --retry       # also re-check ones marked unsupported
+.venv/bin/jobfeed discover --dry-run     # report only; change nothing
 ```
+
+For each name it tries a few slugs (`grafanalabs`, `grafana-labs`, `grafana`) on Greenhouse, then Lever, then Ashby, and takes the first board with open postings:
+
+```
+  Stripe             ✓  greenhouse:stripe · 312 postings
+  Rune Technologies  ✓  lever:rune · 4 postings
+                        check: matched the short name 'rune'; check it's Rune Technologies
+  Zillow             -  not on Greenhouse, Lever or Ashby (tried zillow, zillowgroup, zillow-group)
+
+66 checked · 41 found (30 greenhouse, 6 lever, 5 ashby) · 25 unsupported · 3 worth a look (see 'check:')
+```
+
+It then writes `ats` and `slug` into `companies.yaml`, editing each line in place so comments and layout survive, and saves the old file as `companies.yaml.bak`. Companies found nowhere get `ats: unsupported`. Network trouble leaves a company untouched, so the next `discover` tries it again.
+
+Read the `check:` lines before trusting a match. They flag a match on a shortened name, a Greenhouse board whose name differs from yours, and a board with no open postings, which can be an old one or a different company's. To fix a wrong match, edit its line by hand. To force a re-check, set it back to `ats: null, slug: null`.
+
+Unsupported companies mostly run their own career sites (often Workday). Those can't be polled yet.
 
 Companies with `watch: true` go to the Watchlist section and are never dropped for a missing salary.
 
@@ -126,7 +148,6 @@ jq -r '[.location_raw, .work_mode, (.remote_region // "-"), (.cities | join("; "
 
 A wrong reading is worth a new case in `tests/test_normalize_location.py` or `tests/test_normalize_salary.py`.
 
-`jobfeed discover` exits with a note saying it arrives in milestone 5.
 
 ## Layout
 
@@ -136,6 +157,7 @@ jobfeed/
   config.py         # config.yaml loader and validation
   store.py          # jobs.db: postings, first/last seen, sent
   dedupe.py         # what a run sends: skip sent, one copy per role, 30-day window
+  discover.py       # find each company's ATS; edit companies.yaml in place
   filters.py        # role, location and salary rules; digest sections and sorting
   models.py         # the Job record
   http.py           # client: 20 s timeout, 2 retries with backoff, named User-Agent
@@ -150,6 +172,9 @@ jobfeed/
   sources/
     base.py         # Board, FetchResult, Source protocol
     greenhouse.py   # Greenhouse Job Board API
+    lever.py        # Lever Postings API (US and EU hosts)
+    ashby.py        # Ashby Job Posting API, with compensation
+    common.py       # shared parsing helpers
     __init__.py     # source registry; fetches 4 boards at a time
 tests/              # pytest, no network: httpx.MockTransport + fixtures
 config.yaml         # filter rules

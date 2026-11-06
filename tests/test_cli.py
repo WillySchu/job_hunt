@@ -185,9 +185,6 @@ def test_replay_missing_file(tmp_path):
     assert "can't read postings" in err
 
 
-def test_discover_says_not_built_yet():
-    code, _, err = _run(["discover"])
-    assert code == 2 and "isn't built yet" in err
 
 
 # --- runs that write jobs.db ---------------------------------------------------

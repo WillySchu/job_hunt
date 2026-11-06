@@ -11,6 +11,25 @@ FIXTURES = Path(__file__).parent / "fixtures"
 REPO_ROOT = Path(__file__).parent.parent
 
 
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Any client built without a mock transport fails loudly instead of reaching the internet."""
+    import jobfeed.cli
+    import jobfeed.http
+
+    real = jobfeed.http.make_client
+
+    def guarded(transport: httpx.BaseTransport | None = None) -> httpx.Client:
+        if transport is None:
+            def refuse(request: httpx.Request) -> httpx.Response:
+                raise AssertionError(f"test tried to reach the network: {request.url}")
+            transport = httpx.MockTransport(refuse)
+        return real(transport)
+
+    monkeypatch.setattr(jobfeed.http, "make_client", guarded)
+    monkeypatch.setattr(jobfeed.cli, "make_client", guarded)
+
+
 @pytest.fixture
 def greenhouse_jobs() -> dict:
     return json.loads((FIXTURES / "greenhouse_jobs.json").read_text())

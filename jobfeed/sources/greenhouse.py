@@ -79,6 +79,16 @@ class GreenhouseSource:
             company = self.board_name(client, board.slug)
         return [parse_job(raw, company or board.slug) for raw in raws]
 
+    def probe(self, client: httpx.Client, slug: str) -> tuple[int, str | None]:
+        """(open postings, board display name). Raises NotFound for an unknown slug."""
+        data = get_json(client, f"{API_BASE}/{slug}/jobs")
+        raws = [raw for raw in data.get("jobs") or [] if raw.get("id")]
+        name = next((str(r["company_name"]).strip() for r in raws if r.get("company_name")), None)
+        if name is None:
+            fallback = self.board_name(client, slug)
+            name = fallback if fallback != slug else None
+        return len(raws), name
+
     def board_name(self, client: httpx.Client, slug: str) -> str:
         """The board's display name, falling back to the slug."""
         try:
