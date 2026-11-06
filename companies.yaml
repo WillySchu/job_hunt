@@ -1,0 +1,102 @@
+# companies.yaml — seed list and watchlist for jobfeed
+#
+# Fields per company:
+#   name    Company name as you'd search for it (required)
+#   bucket  Why it's on the list: seattle-hiring | seattle-ai | seattle-local | remote-infra
+#   origin  seed (added by hand) | harvested (added automatically from aggregator apply links)
+#   ats     greenhouse | lever | ashby | unsupported — filled in by `jobfeed discover`
+#   slug    The company's board name on that ATS — filled in by `jobfeed discover`
+#   watch   true = list first in the digest and never drop for a missing salary
+#
+# Run `jobfeed discover` once after editing. It fills in ats and slug for each
+# entry where they're null, and marks companies it can't find as `unsupported`.
+
+companies:
+
+  # --- Seattle area: hiring now (Seattle-metro postings ranking, Nov 2026) ---
+  - { name: Stripe,        bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Databricks,    bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Snowflake,     bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Anduril,       bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Anthropic,     bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Airwallex,     bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Docker,        bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Rippling,      bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Samsara,       bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: LiveRamp,      bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Fluidstack,    bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Lambda,        bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Crusoe,        bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: CoreWeave,     bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Docusign,      bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Okta,          bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Atlassian,     bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Zoom,          bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: CrowdStrike,   bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Writer,        bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: SentiLink,     bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Axon,          bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Qualtrics,     bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: PitchBook,     bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Superhuman,    bucket: seattle-hiring, origin: seed, ats: null, slug: null, watch: false }
+
+  # --- Seattle area: AI startups ---
+  - { name: Gradial,           bucket: seattle-ai, origin: seed, ats: null, slug: null, watch: false }
+  - { name: XBOW,              bucket: seattle-ai, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Dropzone AI,       bucket: seattle-ai, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Auger,             bucket: seattle-ai, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Yoodli,            bucket: seattle-ai, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Oumi,              bucket: seattle-ai, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Howie,             bucket: seattle-ai, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Avante,            bucket: seattle-ai, origin: seed, ats: null, slug: null, watch: false }
+  - { name: CopilotKit,        bucket: seattle-ai, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Overland AI,       bucket: seattle-ai, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Shield AI,         bucket: seattle-ai, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Union.ai,          bucket: seattle-ai, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Rune Technologies, bucket: seattle-ai, origin: seed, ats: null, slug: null, watch: false }
+
+  # --- Seattle area: local HQs and offices ---
+  - { name: Zillow,        bucket: seattle-local, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Expedia Group, bucket: seattle-local, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Remitly,       bucket: seattle-local, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Rover,         bucket: seattle-local, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Outreach,      bucket: seattle-local, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Amperity,      bucket: seattle-local, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Smartsheet,    bucket: seattle-local, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Zuora,         bucket: seattle-local, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Pushpay,       bucket: seattle-local, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Carta,         bucket: seattle-local, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Niantic,       bucket: seattle-local, origin: seed, ats: null, slug: null, watch: false }
+  - { name: ServiceNow,    bucket: seattle-local, origin: seed, ats: null, slug: null, watch: false }
+  - { name: UiPath,        bucket: seattle-local, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Chewy,         bucket: seattle-local, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Snap,          bucket: seattle-local, origin: seed, ats: null, slug: null, watch: false }
+  - { name: FusionAuth,    bucket: seattle-local, origin: seed, ats: null, slug: null, watch: false }
+  - { name: OpenAI,        bucket: seattle-local, origin: seed, ats: null, slug: null, watch: false }
+  - { name: xAI,           bucket: seattle-local, origin: seed, ats: null, slug: null, watch: false }
+
+  # --- Remote-friendly infrastructure (from memory; discover will confirm) ---
+  - { name: GitLab,       bucket: remote-infra, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Grafana Labs, bucket: remote-infra, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Tailscale,    bucket: remote-infra, origin: seed, ats: null, slug: null, watch: false }
+  - { name: PlanetScale,  bucket: remote-infra, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Supabase,     bucket: remote-infra, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Sourcegraph,  bucket: remote-infra, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Temporal,     bucket: remote-infra, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Zapier,       bucket: remote-infra, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Fly.io,       bucket: remote-infra, origin: seed, ats: null, slug: null, watch: false }
+  - { name: Render,       bucket: remote-infra, origin: seed, ats: null, slug: null, watch: false }
+
+# Large Seattle-area employers that hire through their own career sites.
+# jobfeed can't read these in v1, so they're listed here as a reminder to
+# check them by hand. They are not polled.
+manual_check:
+  - Amazon and AWS
+  - Microsoft
+  - Google
+  - Meta
+  - Apple
+  - Salesforce
+  - Oracle
+  - NVIDIA
+  - T-Mobile
