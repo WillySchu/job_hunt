@@ -1,0 +1,48 @@
+{
+  "jobs": [
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/examplecorp/jobs/4412983",
+      "data_compliance": [],
+      "internal_job_id": 2001001,
+      "location": { "name": "Seattle, WA; Remote (US)" },
+      "metadata": [ { "id": 1, "name": "Employment Type", "value": "Full-time", "value_type": "single_select" } ],
+      "id": 4412983,
+      "updated_at": "2026-11-03T10:15:00-05:00",
+      "requisition_id": "ENG-101",
+      "title": "  Senior Backend Engineer, Platform ",
+      "company_name": "Example Corp",
+      "first_published": "2026-10-28T09:00:00-04:00",
+      "content": "&lt;div class=&quot;content-intro&quot;&gt;&lt;p&gt;We build &lt;strong&gt;distributed systems&lt;/strong&gt; at scale.&lt;/p&gt;&lt;/div&gt;&lt;h3&gt;What you&amp;#39;ll do&lt;/h3&gt;&lt;ul&gt;&lt;li&gt;Own Go and Rust services&lt;/li&gt;&lt;li&gt;Run Kafka&amp;nbsp;and Postgres&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;The base pay range for this role is $170,000&amp;mdash;$215,000 USD.&lt;/p&gt;",
+      "departments": [ { "id": 10, "name": "Engineering", "child_ids": [], "parent_id": null } ],
+      "offices": [ { "id": 20, "name": "Seattle", "location": "Seattle, WA", "child_ids": [], "parent_id": null } ]
+    },
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/examplecorp/jobs/4412990",
+      "internal_job_id": 2001002,
+      "location": { "name": "" },
+      "metadata": null,
+      "id": 4412990,
+      "updated_at": "2026-11-05T12:00:00Z",
+      "requisition_id": null,
+      "title": "Staff Infrastructure Engineer",
+      "content": "",
+      "departments": [],
+      "offices": [
+        { "id": 21, "name": "Bellevue", "location": "Bellevue, WA" },
+        { "id": 22, "name": "New York", "location": "New York, NY" }
+      ]
+    },
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/examplecorp/jobs/4413000",
+      "internal_job_id": 2001003,
+      "location": { "name": "London, UK" },
+      "id": 4413000,
+      "updated_at": "not a date",
+      "title": "Frontend Engineer",
+      "content": "&lt;p&gt;React and CSS.&lt;/p&gt;",
+      "departments": [],
+      "offices": []
+    }
+  ],
+  "meta": { "total": 3 }
+}
