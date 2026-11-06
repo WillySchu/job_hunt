@@ -13,6 +13,8 @@ import httpx
 from jobfeed import __version__
 from jobfeed.companies import DEFAULT_PATH, load_companies
 from jobfeed.http import make_client
+from jobfeed.models import Job
+from jobfeed.normalize import format_salary
 from jobfeed.sources import SOURCES, Board, FetchResult, fetch_all
 
 DEFAULT_TEXT_LIMIT = 25
@@ -56,6 +58,28 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def describe(job: Job) -> str:
+    """One line of what the normalizers read: 'remote (us) · Seattle, WA · $170K–$215K · senior'."""
+    mode = job.work_mode
+    if mode == "remote":
+        mode += f" ({job.remote_region or 'region unstated'})"
+    parts = [mode]
+    if job.cities:
+        parts.append("; ".join(job.cities[:4]) + (f" +{len(job.cities) - 4}" if len(job.cities) > 4 else ""))
+    if job.remote_states:
+        parts.append("states: " + ", ".join(job.remote_states))
+    if job.excluded_states:
+        parts.append("not in: " + ", ".join(job.excluded_states))
+    if job.salary_min is not None or job.salary_max is not None:
+        parts.append(format_salary(job.salary_min, job.salary_max))
+    elif job.salary_raw:
+        parts.append(f"{job.salary_raw} ({job.salary_currency}, not compared)")
+    else:
+        parts.append("no salary listed")
+    parts.append(job.seniority or "level unstated")
+    return " · ".join(parts)
+
+
 def _print_text(results: list[FetchResult], limit: int, out: TextIO) -> None:
     for result in results:
         board = result.board
@@ -69,6 +93,7 @@ def _print_text(results: list[FetchResult], limit: int, out: TextIO) -> None:
             posted = job.posted_at.date().isoformat() if job.posted_at else "????-??-??"
             print(f"  {posted}  {job.title}", file=out)
             print(f"              {job.location_raw or '(no location)'}", file=out)
+            print(f"              → {describe(job)}", file=out)
             print(f"              {job.url}", file=out)
         hidden = len(jobs) - len(shown)
         if hidden > 0:

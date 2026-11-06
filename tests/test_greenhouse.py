@@ -25,7 +25,7 @@ def test_parse_job_maps_core_fields(greenhouse_jobs):
     assert job.location_raw == "Seattle, WA; Remote (US)"
     # first_published wins over updated_at, and keeps its offset
     assert job.posted_at == datetime(2026, 10, 28, 9, 0, tzinfo=timezone(timedelta(hours=-4)))
-    # normalized fields stay at defaults until milestone 2
+    # the adapter leaves normalized fields at their defaults; fetch_board fills them
     assert job.work_mode == "unknown" and job.salary_max is None and job.cities == []
 
 
@@ -40,7 +40,7 @@ def test_description_is_unescaped_plain_text(greenhouse_jobs):
 
 def test_location_falls_back_to_offices_and_dates_to_updated_at(greenhouse_jobs):
     job = parse_job(greenhouse_jobs["jobs"][1], "Example Corp")
-    assert job.location_raw == "Bellevue; New York"
+    assert job.location_raw == "Bellevue, WA; New York, NY"
     assert job.posted_at == datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
     assert job.description == ""
 

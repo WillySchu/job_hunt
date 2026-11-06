@@ -80,10 +80,13 @@ class Job:
     url: str                 # the source's own page (keeps attribution terms)
     location_raw: str        # exactly as posted
     work_mode: str           # remote | hybrid | onsite | unknown
-    remote_region: str|None  # us | americas | global | other
-    cities: list[str]        # normalized, e.g. ["Seattle", "Bellevue"]
+    remote_region: str|None  # us | americas | global | other; None = remote, region unstated
+    cities: list[str]        # "Seattle, WA", "Seattle", "London, UK"
+    remote_states: list[str] # US states a remote hire may live in; [] = no limit stated
+    excluded_states: list[str]  # US states the posting says it can't hire in
     salary_min: int|None     # annual USD
     salary_max: int|None
+    salary_currency: str|None   # "USD"; other codes keep salary_raw but leave min/max None
     salary_raw: str|None
     seniority: str|None      # junior | mid | senior | staff | principal
     posted_at: datetime|None
@@ -217,7 +220,7 @@ The tool is a plain Python 3.11+ package in a virtualenv, run once a day by your
 
 Eight milestones, each ending in something you can run. Milestones 1–7 can be built and tested on a laptop; only milestone 8 needs the Pi.
 
-- [ ] **1. Skeleton and Greenhouse.** `Job` model, Greenhouse adapter, `run --dry-run` printing raw postings. Done when it lists jobs for three test companies.
+- [x] **1. Skeleton and Greenhouse.** `Job` model, Greenhouse adapter, `run --dry-run` printing raw postings. Done when it lists jobs for three test companies.
 - [ ] **2. Normalizers.** Location, salary and seniority parsing, with unit tests built from 50+ real location and salary strings.
 - [ ] **3. Filters.** Rules read from `config.yaml`, plus the `replay` command.
 - [ ] **4. Store and dedupe.** `jobs.db`, `first_seen` and `emailed_at` tracking, and the 30-day cross-source dedupe.

@@ -28,12 +28,27 @@ def _parse_time(value: Any) -> datetime | None:
         return None
 
 
+_GENERIC_LOCATIONS = {"multiple locations", "various locations", "multiple", "various", "locations"}
+
+
+def _offices(raw: dict[str, Any]) -> list[str]:
+    """Office places, preferring an office's `location` ("Seattle, WA") over its name ("US-PERM")."""
+    out = []
+    for office in raw.get("offices") or []:
+        place = (office.get("location") or office.get("name") or "").strip()
+        if place and place not in out:
+            out.append(place)
+    return out
+
+
 def _location(raw: dict[str, Any]) -> str:
     name = ((raw.get("location") or {}).get("name") or "").strip()
-    if name:
+    if name and name.lower() not in _GENERIC_LOCATIONS:
         return name
-    offices = [o.get("name", "").strip() for o in raw.get("offices") or [] if o.get("name")]
-    return "; ".join(offices)
+    offices = _offices(raw)
+    if name and offices:
+        return f"{name}: {'; '.join(offices)}"
+    return name or "; ".join(offices)
 
 
 def parse_job(raw: dict[str, Any], company: str) -> Job:

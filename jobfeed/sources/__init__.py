@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 
 from jobfeed.http import FetchError, NotFound
+from jobfeed.normalize import normalize_job
 from jobfeed.sources.base import Board, FetchResult, Source
 from jobfeed.sources.greenhouse import GreenhouseSource
 
@@ -22,7 +23,7 @@ def fetch_board(client: httpx.Client, board: Board) -> FetchResult:
     if source is None:
         return FetchResult(board, error=f"unknown source '{board.source}'")
     try:
-        return FetchResult(board, jobs=source.fetch(client, board))
+        return FetchResult(board, jobs=[normalize_job(j) for j in source.fetch(client, board)])
     except NotFound:
         return FetchResult(board, error="board not found (check the slug)")
     except FetchError as exc:

@@ -35,6 +35,10 @@ def test_dry_run_prints_postings_newest_first(greenhouse_jobs):
     assert "== Example Corp (greenhouse:examplecorp) · 3 postings" in out
     assert out.index("Staff Infrastructure Engineer") < out.index("Senior Backend Engineer, Platform")
     assert "Seattle, WA; Remote (US)" in out
+    # the normalizers' reading of each posting
+    assert "→ remote (us) · Seattle, WA · $170K–$215K · senior" in out
+    assert "→ onsite · Bellevue, WA; New York, NY · no salary listed · staff" in out
+    assert "→ onsite · London, UK · no salary listed · level unstated" in out
     assert "3 boards · 2 ok · 1 failed · 3 postings" in err
     assert "FAILED greenhouse:nope: board not found" in err
     assert "EMPTY  greenhouse:emptyco" in err
@@ -54,6 +58,7 @@ def test_json_output_is_one_job_per_line(greenhouse_jobs):
     assert code == 0
     assert [r["id"] for r in rows] == ["greenhouse:4412983", "greenhouse:4412990", "greenhouse:4413000"]
     assert rows[0]["company"] == "Example Corp"
+    assert (rows[0]["work_mode"], rows[0]["salary_max"], rows[0]["seniority"]) == ("remote", 215_000, "senior")
 
 
 def test_all_boards_failing_exits_1():

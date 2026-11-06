@@ -7,7 +7,7 @@ A daily email digest of new software engineering postings that are remote or in 
 | Milestone | State |
 | --- | --- |
 | 1. Skeleton and Greenhouse | **Done** — `Job` model, Greenhouse adapter, `run --dry-run` |
-| 2. Normalizers | Not started |
+| 2. Normalizers | **Built** — location, salary and seniority parsing; needs a check against live boards |
 | 3. Filters | Not started |
 | 4. Store and dedupe | Not started |
 | 5. Lever, Ashby and discover | Not started |
@@ -52,6 +52,27 @@ Without `--board`, `run --dry-run` polls every company in `companies.yaml` that 
 
 `jobfeed run` without `--dry-run`, `discover` and `replay` exit with a note saying which milestone builds them.
 
+### What the normalizers read
+
+Each posting in the dry run gets an arrow line with what the normalizers made of it:
+
+```
+  2026-10-28  Senior Backend Engineer, Platform
+              Seattle, WA; Remote (US)
+              → remote (us) · Seattle, WA · $170K–$215K · senior
+```
+
+In order: work mode (and remote region), cities, eligible or excluded states when the posting names them, salary (annual USD), and seniority. Non-USD pay shows its raw text with "not compared". Adapters set fields their source states outright; the normalizers only fill what's still blank.
+
+To hunt for strings the parser gets wrong, list each distinct location next to its reading:
+
+```sh
+.venv/bin/jobfeed run --dry-run --json --board greenhouse:stripe --board greenhouse:databricks \
+  | jq -r '[.location_raw, .work_mode, (.remote_region // "-"), (.cities | join("; "))] | @tsv' | sort -u
+```
+
+A wrong reading is worth a new case in `tests/test_normalize_location.py` or `tests/test_normalize_salary.py`.
+
 The summary line and any failures go to stderr, so `--json > jobs.jsonl` captures only postings.
 
 ## Layout
@@ -63,6 +84,12 @@ jobfeed/
   http.py           # client: 20 s timeout, 2 retries with backoff, named User-Agent
   text.py           # HTML to plain text
   companies.py      # companies.yaml loader
+  normalize/
+    __init__.py     # normalize_job: fills blank fields, never overwrites adapter data
+    location.py     # work mode, remote region, cities, state eligibility
+    salary.py       # pay ranges, annualized; currency kept
+    seniority.py    # title -> junior | mid | senior | staff | principal
+    geo.py          # state, region and city-alias tables
   sources/
     base.py         # Board, FetchResult, Source protocol
     greenhouse.py   # Greenhouse Job Board API
