@@ -17,12 +17,13 @@ from jobfeed.companies import load_companies
 from jobfeed.config import DEFAULT_PATH as CONFIG_PATH
 from jobfeed.config import Config, ConfigError, load_config
 from jobfeed.dedupe import Plan, plan_run
-from jobfeed.discover import Discovery, EditError, discover_all, update_companies_file
+from jobfeed.discover import HARVEST_HEADER, Discovery, EditError, discover_all, update_companies_file
+from jobfeed.harvest import harvest
 from jobfeed.filters import SECTION_ORDER, SECTION_TITLES, WATCHLIST, Digest, Entry
 from jobfeed.http import make_client
 from jobfeed.models import Job
 from jobfeed.normalize import format_salary
-from jobfeed.sources import SOURCES, Board, FetchResult, fetch_all
+from jobfeed.sources import SOURCE_NAMES, SOURCES, Board, FetchResult, fetch_all
 from jobfeed.store import DEFAULT_PATH as DB_PATH
 from jobfeed.store import Store, StoreError, utc_now
 
@@ -63,6 +64,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SOURCE:SLUG",
         help="poll this board instead of companies.yaml; repeatable (e.g. greenhouse:anthropic)",
     )
+    run.add_argument("--no-aggregators", action="store_true",
+                     help="poll only companies.yaml boards, not Remotive, Remote OK and Himalayas")
     run.add_argument("--json", action="store_true",
                      help="print every fetched posting as one JSON Job per line, unfiltered; writes nothing")
 
@@ -113,7 +116,7 @@ def _entry_lines(entry: Entry) -> list[str]:
     if job.remote_states:
         detail.append("states: " + ", ".join(job.remote_states))
     detail += entry.verdict.tags
-    detail.append(f"via {job.source.title()}")
+    detail.append(f"via {SOURCE_NAMES.get(job.source, job.source)}")
     if job.posted_at:
         detail.append(f"posted {job.posted_at.date().isoformat()}")
     return [f"  {head}", f"      {' · '.join(detail)}", f"      {job.url}"]
@@ -210,10 +213,12 @@ def cmd_run(args: argparse.Namespace, transport: httpx.BaseTransport | None, out
         boards = args.board
     else:
         boards = [b for b in load_companies(args.companies).boards() if b.source in SOURCES]
+        if not args.no_aggregators:
+            boards += aggregator_boards(config)
         if not boards:
-            print(f"No boards to poll: no company in {args.companies} has `ats` and `slug` filled in "
-                  "for a supported source yet (`discover` arrives in milestone 5).\n"
-                  "Try: jobfeed run --dry-run --board greenhouse:SLUG", file=err)
+            print(f"No boards to poll: no company in {args.companies} has `ats` and `slug` filled in, "
+                  "and the aggregators are off.\n"
+                  "Run `jobfeed discover`, or try: jobfeed run --dry-run --board greenhouse:SLUG", file=err)
             return 2
 
     with make_client(transport) as client:
@@ -242,10 +247,48 @@ def cmd_run(args: argparse.Namespace, transport: httpx.BaseTransport | None, out
             store.save_run([(j, plan.keys[j.id], plan.matched[j.id]) for j in jobs], sent, now)
             print(f"saved {len(jobs)} postings to {args.db} · marked {len(sent)} as sent "
                   "(email arrives in milestone 7; until then the digest above is the send)", file=err)
+        if config.aggregators.harvest:
+            _harvest(jobs, config, args, write=write, err=err)
     finally:
         if store:
             store.close()
     return status
+
+
+def aggregator_boards(config: Config) -> list[Board]:
+    agg = config.aggregators
+    boards: list[Board] = []
+    if agg.remotive:
+        boards.append(Board("remotive", agg.remotive_category.strip()))
+    if agg.remoteok:
+        boards.append(Board("remoteok", ",".join(agg.remoteok_tags) or "all"))
+    if agg.himalayas:
+        options = (("pages", str(agg.himalayas_pages)),)
+        if agg.himalayas_country.strip():
+            options += (("country", agg.himalayas_country.strip()),)
+        boards += [Board("himalayas", q.strip(), options=options) for q in agg.himalayas_queries if q.strip()]
+    return boards
+
+
+def _harvest(jobs: list[Job], config: Config, args: argparse.Namespace, *, write: bool, err: TextIO) -> None:
+    try:
+        found = harvest(jobs, load_companies(args.companies), config)
+    except ValueError as exc:
+        print(f"harvest skipped: can't read {args.companies}: {exc}", file=err)
+        return
+    if not found:
+        return
+    listed = ", ".join(f"{d.name} ({d.ats}:{d.slug})" for d in found)
+    if not write:
+        print(f"would add {len(found)} companies from aggregator links: {listed}", file=err)
+        return
+    try:
+        update_companies_file(args.companies, found, origin="harvested", header=HARVEST_HEADER)
+    except (EditError, OSError) as exc:
+        print(f"harvest found {len(found)} companies but {args.companies} wasn't changed: {exc}", file=err)
+        return
+    print(f"added {len(found)} companies to {args.companies} from aggregator links (polled from the next run): "
+          f"{listed}", file=err)
 
 
 def read_jobs(path: Path) -> list[Job]:

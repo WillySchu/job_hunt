@@ -18,6 +18,10 @@ class Board:
     slug: str
     company: str | None = None  # display name; looked up from the source when missing
     watch: bool = False
+    options: tuple[tuple[str, str], ...] = ()  # source-specific settings, e.g. (("country", "US"),)
+
+    def option(self, key: str, default: str | None = None) -> str | None:
+        return dict(self.options).get(key, default)
 
     @property
     def label(self) -> str:

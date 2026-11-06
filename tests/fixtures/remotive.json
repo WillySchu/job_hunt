@@ -1,0 +1,38 @@
+{
+  "0-legal-notice": "Remotive API Legal Notice",
+  "job-count": 3,
+  "jobs": [
+    {
+      "id": 1842567,
+      "url": "https://remotive.com/remote-jobs/software-dev/senior-backend-engineer-1842567",
+      "title": "Senior Backend Engineer",
+      "company_name": "Acme Payments",
+      "category": "Software Development",
+      "job_type": "full_time",
+      "publication_date": "2026-11-04T10:23:26",
+      "candidate_required_location": "USA",
+      "salary": "$160k - $200k",
+      "description": "<p>Go and Postgres.</p><p><a href=\"https://boards.greenhouse.io/acmepayments/jobs/777?gh_src=remotive\">Apply here</a></p>"
+    },
+    {
+      "id": 1842568,
+      "url": "https://remotive.com/remote-jobs/software-dev/frontend-engineer-1842568",
+      "title": "Frontend Engineer",
+      "company_name": "Pixel Co",
+      "publication_date": "2026-11-04T11:00:00",
+      "candidate_required_location": "Worldwide",
+      "salary": "",
+      "description": "<p>React all day. <a href=\"https://jobs.lever.co/pixelco/abc\">Apply</a></p>"
+    },
+    {
+      "id": 1842569,
+      "url": "https://remotive.com/remote-jobs/software-dev/platform-engineer-1842569",
+      "title": "Platform Engineer",
+      "company_name": "Euro Cloud",
+      "publication_date": "2026-11-03T09:00:00",
+      "candidate_required_location": "Europe",
+      "salary": "€80,000 - €100,000",
+      "description": "<p>Kubernetes.</p>"
+    }
+  ]
+}

@@ -19,6 +19,7 @@ COUNTRY_NAMES = {
 _INTERVALS = [
     (re.compile(r"year|annual|yr", re.IGNORECASE), 1),
     (re.compile(r"month", re.IGNORECASE), 12),
+    (re.compile(r"fortnight|biweek|bi-week", re.IGNORECASE), 26),
     (re.compile(r"week", re.IGNORECASE), 52),
     (re.compile(r"day|daily", re.IGNORECASE), 260),
     (re.compile(r"hour", re.IGNORECASE), 2080),
@@ -62,6 +63,41 @@ def parse_time(value: Any) -> datetime | None:
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return None
+    return None
+
+
+# Company job boards on the ATSes jobfeed can poll, as they appear in apply links.
+BOARD_LINKS = [
+    ("greenhouse", re.compile(
+        r"https?://(?:boards|job-boards)(?:\.eu)?\.greenhouse\.io/(?:embed/job_board\?for=)?([A-Za-z0-9_-]+)",
+        re.IGNORECASE)),
+    ("greenhouse", re.compile(r"greenhouse\.io/embed/job_app\?(?:[^\s\"'<>]*&)?for=([A-Za-z0-9_-]+)",
+                              re.IGNORECASE)),
+    ("lever", re.compile(r"https?://jobs(?:\.eu)?\.lever\.co/([A-Za-z0-9_.-]+)", re.IGNORECASE)),
+    ("ashby", re.compile(r"https?://jobs\.ashbyhq\.com/([A-Za-z0-9_.%-]+)", re.IGNORECASE)),
+]
+_NOT_SLUGS = {"embed", "v1", "boards", "jobs", "api", "job_app", "job_board", "search"}
+_URL = re.compile(r"https?://[^\s\"'<>)]+", re.IGNORECASE)
+
+
+def board_of(url: str) -> tuple[str, str] | None:
+    """('greenhouse', 'stripe') for a Greenhouse/Lever/Ashby job link, else None."""
+    from urllib.parse import unquote
+
+    for ats, pattern in BOARD_LINKS:
+        if m := pattern.search(url):
+            slug = unquote(m.group(1)).strip()
+            if slug and slug.lower() not in _NOT_SLUGS:
+                return ats, slug
+    return None
+
+
+def first_board_link(*texts: str | None) -> str | None:
+    """The first URL in these texts (raw HTML is fine) that points at a company board."""
+    for text in texts:
+        for url in _URL.findall(text or ""):
+            if board_of(url):
+                return url.rstrip(".,;")
     return None
 
 

@@ -14,6 +14,7 @@ class Job:
     company: str
     title: str
     url: str                        # the source's own page (keeps attribution terms)
+    apply_url: str | None = None    # a company board link, when an aggregator posting has one
     location_raw: str = ""          # exactly as posted
     work_mode: str = "unknown"      # remote | hybrid | onsite | unknown
     remote_region: str | None = None  # us | americas | global | other; None = remote, region unstated

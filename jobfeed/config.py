@@ -63,16 +63,32 @@ class DigestRules:
 
 
 @dataclass
+class AggregatorRules:
+    remotive: bool = True
+    remotive_category: str = "software-dev"
+    remoteok: bool = True
+    remoteok_tags: list[str] = field(default_factory=list)
+    himalayas: bool = True
+    himalayas_queries: list[str] = field(default_factory=lambda: [
+        "software engineer", "backend engineer", "platform engineer",
+    ])
+    himalayas_country: str = "US"
+    himalayas_pages: int = 2
+    harvest: bool = True
+
+
+@dataclass
 class Config:
     role: RoleRules = field(default_factory=RoleRules)
     location: LocationRules = field(default_factory=LocationRules)
     salary: SalaryRules = field(default_factory=SalaryRules)
     seniority: SeniorityRules = field(default_factory=SeniorityRules)
     digest: DigestRules = field(default_factory=DigestRules)
+    aggregators: AggregatorRules = field(default_factory=AggregatorRules)
 
 
 _SECTIONS = {"role": RoleRules, "location": LocationRules, "salary": SalaryRules,
-             "seniority": SeniorityRules, "digest": DigestRules}
+             "seniority": SeniorityRules, "digest": DigestRules, "aggregators": AggregatorRules}
 _REGIONS = {"us", "americas", "global", "other", "unknown"}
 _RANKS = {"junior", "mid", "senior", "staff", "principal"}
 
@@ -133,6 +149,13 @@ def _validate(cfg: Config) -> None:
         raise ConfigError(f"`seniority.prefer` has unknown level(s) {sorted(bad)}; use {', '.join(sorted(_RANKS))}")
     if cfg.digest.max_per_section < 1:
         raise ConfigError("`digest.max_per_section` must be at least 1")
+    agg = cfg.aggregators
+    if not 1 <= agg.himalayas_pages <= 10:
+        raise ConfigError("`aggregators.himalayas_pages` must be 1 to 10 (20 postings a page)")
+    if agg.remotive and not agg.remotive_category.strip():
+        raise ConfigError("`aggregators.remotive_category` is empty; use `all`, or set `remotive: false`")
+    if agg.himalayas and not agg.himalayas_queries:
+        raise ConfigError("`aggregators.himalayas_queries` is empty; add a query, or set `himalayas: false`")
 
 
 def load_config(path: Path = DEFAULT_PATH) -> Config:

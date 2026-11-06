@@ -10,8 +10,8 @@ A daily email digest of new software engineering postings that are remote or in 
 | 2. Normalizers | **Done** — location, salary and seniority parsing |
 | 3. Filters | **Done** — rules from `config.yaml`, digest preview, `replay` |
 | 4. Store and dedupe | **Done** — `jobs.db`, sent tracking, 30-day cross-source dedupe |
-| 5. Lever, Ashby and discover | **Built** — two more adapters; `discover` fills in `companies.yaml` |
-| 6. Aggregators | Not started |
+| 5. Lever, Ashby and discover | **Done** — two more adapters; `discover` fills in `companies.yaml` |
+| 6. Aggregators | **Built** — Remotive, Remote OK and Himalayas; harvesting company boards from their links |
 | 7. Email | Not started |
 | 8. Deploy | Not started |
 
@@ -65,7 +65,23 @@ Counts, drop totals and board failures go to stderr, so redirecting stdout captu
 
 `--board` takes `greenhouse:SLUG`, `lever:SLUG` or `ashby:SLUG`. The slug is the company's part of its board URL: `job-boards.greenhouse.io/SLUG`, `jobs.lever.co/SLUG`, `jobs.ashbyhq.com/SLUG`. A wrong slug shows up as `FAILED lever:SLUG: board not found` and doesn't stop the other boards.
 
-Without `--board`, `run` polls every company in `companies.yaml` that has an `ats` and a `slug`; `discover` fills those in.
+Without `--board`, `run` polls every company in `companies.yaml` that has an `ats` and a `slug` (`discover` fills those in), plus the three remote-job aggregators below. `--no-aggregators` leaves those out.
+
+### Aggregators
+
+Remotive, Remote OK and Himalayas list remote jobs across many companies, so they need no company list. Settings are in the `aggregators` section of `config.yaml`:
+
+- **Remotive**: one category (default `software-dev`), one call per run. Remotive allows at most 4 calls a day, and its listings arrive 24 hours late.
+- **Remote OK**: the newest ~100 postings, optionally narrowed by tags. There's no paging, so it needs to run daily to catch everything.
+- **Himalayas**: a few searches (default "software engineer", "backend engineer" and "platform engineer"), restricted to postings open to the US, 2 pages of 20 each.
+
+They also work with `--board`: `remotive:software-dev`, `remoteok:all` (or `remoteok:backend,golang`), `himalayas:backend engineer`.
+
+All three ask, as a condition of using their APIs, for a link back to the posting on their site and credit as the source. Each aggregator posting in the digest links to its page there and says `via Remotive`, `via Remote OK` or `via Himalayas`. Don't strip those if you change the email.
+
+When an aggregator and a company's own board carry the same role, the company board's copy is the one sent (see Run for real).
+
+**Harvesting.** When an aggregator posting for an engineering role links to the company's own Greenhouse, Lever or Ashby board, `run` adds the company to `companies.yaml`. New entries go under a "harvested from aggregator postings" header with `origin: harvested`, and their boards are polled from the next run. `--dry-run` only reports what it would add. A board already on your list under any name is skipped, as is a company already pointing at a different board. A company you listed without a board (`ats: null` or `unsupported`) gets the one found. Set `aggregators.harvest: false` to turn this off.
 
 ### Find each company's board
 
@@ -158,6 +174,7 @@ jobfeed/
   store.py          # jobs.db: postings, first/last seen, sent
   dedupe.py         # what a run sends: skip sent, one copy per role, 30-day window
   discover.py       # find each company's ATS; edit companies.yaml in place
+  harvest.py        # company boards found in aggregator postings
   filters.py        # role, location and salary rules; digest sections and sorting
   models.py         # the Job record
   http.py           # client: 20 s timeout, 2 retries with backoff, named User-Agent
@@ -174,6 +191,7 @@ jobfeed/
     greenhouse.py   # Greenhouse Job Board API
     lever.py        # Lever Postings API (US and EU hosts)
     ashby.py        # Ashby Job Posting API, with compensation
+    aggregators.py  # Remotive, Remote OK, Himalayas
     common.py       # shared parsing helpers
     __init__.py     # source registry; fetches 4 boards at a time
 tests/              # pytest, no network: httpx.MockTransport + fixtures

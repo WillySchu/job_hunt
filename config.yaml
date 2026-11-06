@@ -63,3 +63,20 @@ seniority:
 
 digest:
   max_per_section: 50
+
+aggregators:
+  # Remote-only job boards that cover many companies at once. Each posting links
+  # back to the aggregator's page and is credited in the digest ("via Remotive"),
+  # as their terms ask.
+  remotive: true
+  remotive_category: software-dev   # a Remotive category slug, or `all`; one call per run (limit is 4 a day)
+  remoteok: true
+  remoteok_tags: []                 # e.g. [backend, golang]; [] = the newest ~100 postings of every kind
+  himalayas: true
+  himalayas_queries: [software engineer, backend engineer, platform engineer]
+  himalayas_country: US             # postings open to this country; "" for any
+  himalayas_pages: 2                # 20 postings a page, per query
+  # When an aggregator posting for an engineering role links to a company's own
+  # Greenhouse, Lever or Ashby board, add that company to companies.yaml
+  # (origin: harvested) so its board is polled from the next run.
+  harvest: true

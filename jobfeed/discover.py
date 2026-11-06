@@ -119,6 +119,7 @@ def discover_all(client: httpx.Client, names: list[str]) -> list[Discovery]:
 # grouping and one-line-per-company layout survive.
 
 _ADDED_HEADER = "  # --- added by jobfeed discover ---"
+HARVEST_HEADER = "  # --- harvested from aggregator postings ---"
 
 
 class EditError(Exception):
@@ -144,7 +145,8 @@ def _set_field(line: str, key: str, value: str) -> str:
     return line[:close].rstrip() + f", {key}: {value} " + line[close:]
 
 
-def update_companies_file(path: Path, discoveries: list[Discovery], *, backup: bool = True) -> list[str]:
+def update_companies_file(path: Path, discoveries: list[Discovery], *, backup: bool = True,
+                          origin: str = "seed", header: str = _ADDED_HEADER) -> list[str]:
     """Write each discovery's ats and slug into companies.yaml. Returns the names it added as new entries.
 
     Companies with a network error are left alone. Companies found nowhere
@@ -164,14 +166,14 @@ def update_companies_file(path: Path, discoveries: list[Discovery], *, backup: b
         if index is None:
             if any(re.search(rf"\bname:\s*['\"]?{re.escape(d.name)}['\"]?\s*$", ln, re.IGNORECASE) for ln in lines):
                 raise EditError(f"{d.name} is written across several lines in {path}; set its ats and slug by hand")
-            new_lines.append(f"  - {{ name: {_yaml_scalar(d.name)}, bucket: null, origin: seed, ats: {ats}, "
+            new_lines.append(f"  - {{ name: {_yaml_scalar(d.name)}, bucket: null, origin: {origin}, ats: {ats}, "
                              f"slug: {slug}, watch: false }}")
             added.append(d.name)
             continue
         lines[index] = _set_field(_set_field(lines[index], "ats", ats), "slug", slug)
 
     if new_lines:
-        lines = _insert_new_entries(lines, new_lines)
+        lines = _insert_new_entries(lines, new_lines, header)
 
     updated = "\n".join(lines)
     _check(updated, discoveries, path)
@@ -181,7 +183,7 @@ def update_companies_file(path: Path, discoveries: list[Discovery], *, backup: b
     return added
 
 
-def _insert_new_entries(lines: list[str], new_lines: list[str]) -> list[str]:
+def _insert_new_entries(lines: list[str], new_lines: list[str], header: str) -> list[str]:
     try:
         start = next(i for i, ln in enumerate(lines) if re.match(r"^companies:\s*(#.*)?$", ln))
     except StopIteration:
@@ -195,10 +197,16 @@ def _insert_new_entries(lines: list[str], new_lines: list[str]) -> list[str]:
     # back up over trailing blank or comment-only lines that belong to the next section
     insert_at = end
     while insert_at > start + 1 and (not lines[insert_at - 1].strip() or lines[insert_at - 1].lstrip().startswith("#")):
-        if lines[insert_at - 1].strip() == _ADDED_HEADER.strip():
+        if lines[insert_at - 1].strip() == header.strip():
             break
         insert_at -= 1
-    block = new_lines if _ADDED_HEADER in lines else ["", _ADDED_HEADER, *new_lines]
+    if header in lines:
+        # Under an existing header: add after that group's last entry.
+        at = lines.index(header) + 1
+        while at < len(lines) and lines[at].lstrip().startswith("- {"):
+            at += 1
+        return lines[:at] + new_lines + lines[at:]
+    block = ["", header, *new_lines]
     return lines[:insert_at] + block + lines[insert_at:]
 
 

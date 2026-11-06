@@ -31,8 +31,8 @@ v1 reads six free, keyless JSON sources. Three are remote-job aggregators that n
 | [Lever](https://theirstack.com/en/blog/13-ats-platforms-with-public-job-posting-api) | ATS board | `api.lever.co/v0/postings/{slug}` | Whole board per call; no server-side filtering |
 | [Ashby](https://jobspipe.dev/guides/ashby-api) | ATS board | `api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true` | Salary bands when the employer publishes them; no company name in the response |
 | [Remotive](https://github.com/remotive-com/remote-jobs-api) | Aggregator | `remotive.com/api/remote-jobs?category=software-dev` | Listings delayed 24 hours; at most 4 calls a day advised, over 2 a minute blocked; link back and credit Remotive |
-| [RemoteOK](https://apify.com/jungle_synthesizer/remoteok-jobs-scraper) | Aggregator | `remoteok.com/api` | About 100 newest jobs per call, no paging, so it must run daily; link back required |
-| [Himalayas](https://apify.com/himalayas/remote-jobs) | Aggregator | `himalayas.app/jobs/api/search` | Filters by keyword, country, seniority and timezone; 20 jobs per page; 429s on heavy use; credit Himalayas |
+| [RemoteOK](https://apify.com/jungle_synthesizer/remoteok-jobs-scraper) | Aggregator | `remoteok.com/api` | About 100 newest jobs per call, no paging, so it must run daily; the first array element is a legal notice; link back required |
+| [Himalayas](https://apify.com/himalayas/remote-jobs) | Aggregator | `himalayas.app/jobs/api/search?q=...&sort=recent&page=N` | Filters by keyword, country, seniority and timezone; 20 jobs per page, paged until one is empty; 429s on heavy use; credit Himalayas |
 
 The HN "Who's Hiring" thread (monthly, via the [HN Algolia API](https://hn.algolia.com/api)) is a stretch goal for v1. Its posts are free text, so it needs an LLM or a loose parser to extract fields.
 
@@ -78,6 +78,7 @@ class Job:
     company: str
     title: str
     url: str                 # the source's own page (keeps attribution terms)
+    apply_url: str|None      # a company board link found in an aggregator posting
     location_raw: str        # exactly as posted
     work_mode: str           # remote | hybrid | onsite | unknown
     remote_region: str|None  # us | americas | global | other; None = remote, region unstated
@@ -230,7 +231,7 @@ Eight milestones, each ending in something you can run. Milestones 1–7 can be 
 - [x] **2. Normalizers.** Location, salary and seniority parsing, with unit tests built from 50+ real location and salary strings.
 - [x] **3. Filters.** Rules read from `config.yaml`, plus the `replay` command.
 - [x] **4. Store and dedupe.** `jobs.db`, `first_seen` and `emailed_at` tracking, and the 30-day cross-source dedupe.
-- [ ] **5. Lever, Ashby and discover.** Two more adapters and the `discover` command, then discover run on the starter names in the Seed list section.
+- [x] **5. Lever, Ashby and discover.** Two more adapters and the `discover` command, then discover run on the starter names in the Seed list section.
 - [ ] **6. Aggregators.** Remotive, RemoteOK and Himalayas adapters, with their attribution links kept, plus slug harvesting from their apply links.
 - [ ] **7. Email.** HTML and text digest sent through Gmail; first real send to yourself.
 - [ ] **8. Deploy.** Install on the Pi, add the cron line, then read a week of digests and tune `config.yaml`.

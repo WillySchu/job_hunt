@@ -70,7 +70,8 @@ def test_all_lists_drops_with_reasons(greenhouse_jobs, no_companies):
 def test_watchlist_from_companies_yaml(greenhouse_jobs, tmp_path):
     path = tmp_path / "companies.yaml"
     path.write_text("companies:\n  - { name: Example Corp, ats: greenhouse, slug: examplecorp, watch: true }\n")
-    code, out, _ = _run(["run", "--dry-run", "--companies", str(path), "--db", str(tmp_path / "jobs.db")],
+    code, out, _ = _run(["run", "--dry-run", "--no-aggregators", "--companies", str(path),
+                         "--db", str(tmp_path / "jobs.db")],
                         _transport(greenhouse_jobs))
     assert code == 0
     assert "2 new (2 watchlist)" in out
@@ -80,7 +81,7 @@ def test_watchlist_from_companies_yaml(greenhouse_jobs, tmp_path):
 def test_limit_caps_each_section(greenhouse_jobs, tmp_path):
     path = tmp_path / "companies.yaml"
     path.write_text("companies:\n  - { name: Example Corp, ats: greenhouse, slug: examplecorp, watch: true }\n")
-    _, out, _ = _run(["run", "--dry-run", "--companies", str(path), "--db", str(tmp_path / "jobs.db"),
+    _, out, _ = _run(["run", "--dry-run", "--no-aggregators", "--companies", str(path), "--db", str(tmp_path / "jobs.db"),
                       "--limit", "1"], _transport(greenhouse_jobs))
     assert "== Watchlist (2)" in out
     assert "… 1 more not shown" in out
@@ -122,9 +123,10 @@ def test_all_boards_failing_exits_1(no_companies):
 def test_no_configured_boards_explains(tmp_path):
     path = tmp_path / "companies.yaml"
     path.write_text("companies:\n  - { name: Acme, ats: null, slug: null }\n")
-    code, _, err = _run(["run", "--dry-run", "--companies", str(path), "--db", str(tmp_path / "jobs.db")])
+    code, _, err = _run(["run", "--dry-run", "--no-aggregators", "--companies", str(path),
+                         "--db", str(tmp_path / "jobs.db")])
     assert code == 2
-    assert "--board greenhouse:SLUG" in err
+    assert "the aggregators are off" in err and "--board greenhouse:SLUG" in err
 
 
 @pytest.mark.parametrize("spec", ["greenhouse", "workday:acme", ":acme"])

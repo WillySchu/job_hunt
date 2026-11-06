@@ -1,0 +1,40 @@
+{
+  "updatedAt": 1762430000,
+  "offset": 0,
+  "limit": 20,
+  "totalCount": 2,
+  "jobs": [
+    {
+      "title": "Senior Software Engineer, Data",
+      "excerpt": "Build data pipelines.",
+      "companyName": "Motive Analytics",
+      "companySlug": "motive-analytics",
+      "employmentType": "Full Time",
+      "minSalary": 85,
+      "maxSalary": 100,
+      "salaryPeriod": "hourly",
+      "currency": "USD",
+      "seniority": ["Senior"],
+      "locationRestrictions": [{ "alpha2": "US", "name": "United States", "slug": "united-states" }],
+      "timezoneRestrictions": ["UTC-8", "UTC-5"],
+      "categories": ["Software-Engineering"],
+      "description": "<p>Spark at scale.</p>",
+      "pubDate": 1762200000000,
+      "expiryDate": 1767000000000,
+      "applicationLink": "https://himalayas.app/companies/motive-analytics/jobs/senior-software-engineer-data?utm_source=api",
+      "guid": "https://himalayas.app/companies/motive-analytics/jobs/senior-software-engineer-data"
+    },
+    {
+      "title": "Backend Engineer",
+      "companyName": "Anywhere Inc",
+      "minSalary": null,
+      "maxSalary": null,
+      "locationRestrictions": [],
+      "description": "",
+      "excerpt": "Remote anywhere.",
+      "pubDate": 1762100000000,
+      "applicationLink": "https://himalayas.app/companies/anywhere/jobs/backend-engineer?utm_source=api",
+      "guid": "https://himalayas.app/companies/anywhere/jobs/backend-engineer"
+    }
+  ]
+}
