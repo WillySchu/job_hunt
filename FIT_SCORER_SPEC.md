@@ -132,7 +132,7 @@ Five milestones, built in order. The first two start scoring every posting, hidd
 - [x] **1. Resume and keyword scorer.** Fetch the resume, schema 6, the keyword scorer, scoring each run's digest postings, and `jobfeed fit backfill`. Done when every posting sent has a keyword score.
 - [x] **2. LLM scorer.** The API key, Haiku 5.5 with structured outputs and a cached system prompt, four calls at a time, the per-run and monthly caps, retries, and the cost line in the footer. Done when every posting sent has both scores, including the backfill.
 - [x] **3. Scores on applications and in the stats.** Copy both scores when an application is logged; a split per scorer in `jobfeed stats` and the weekly report; the top-half against bottom-half reply comparison.
-- [ ] **4. Ratings and agreement.** `jobfeed fit rate` (blind, 1–5) and `jobfeed fit compare`: agreement between the scorers, each against your ratings, and the ten biggest disagreements over two weeks old.
+- [x] **4. Ratings and agreement.** `jobfeed fit rate` (blind, 1–5) and `jobfeed fit compare`: agreement between the scorers, each against your ratings, and the ten biggest disagreements over two weeks old.
 - [ ] **5. Visible scores, after the baseline.** `fit.show: llm` puts the score and reason on each digest entry; `fit.sort: true` orders each section by it. One config change each; the stats split applications by when it was turned on (phase 3 of the tracker's experiment plan).
 
 ## Risks and open questions

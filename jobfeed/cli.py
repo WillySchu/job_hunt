@@ -29,7 +29,7 @@ from jobfeed.mailer import DEFAULT_ENV, GmailMailer, MailConfigError, Mailer, Se
 from jobfeed.sources import SOURCE_NAMES, SOURCES, Board, FetchResult, fetch_all
 from jobfeed.store import DEFAULT_PATH as DB_PATH
 from jobfeed.store import Store, StoreError, utc_now
-from jobfeed import fit, followups, llm, mailbox, scoring, stats, tracker, weekly
+from jobfeed import fit, fitcompare, followups, llm, mailbox, scoring, stats, tracker, weekly
 from jobfeed.imap import GmailReader, ReadError
 from jobfeed.tracker import TrackerError
 
@@ -190,6 +190,11 @@ def _tracker_parsers(sub) -> None:
     fsub.add_parser("status", parents=[fshared], help="how many postings are scored, against which resume, and spend")
     fsub.add_parser("check", parents=[fshared],
                     help="score one made-up posting with the LLM, to check the key and the reply")
+    fr = fsub.add_parser("rate", parents=[fshared],
+                         help="rate recent postings 1-5 without seeing their scores, to check the scorers against")
+    fr.add_argument("--count", type=int, default=40, help="how many to ask about this time (default 40)")
+    fsub.add_parser("compare", parents=[fshared],
+                    help="how the scorers agree, how each tracks your ratings, and their biggest disagreements")
 
     mail = sub.add_parser("mail", parents=[db], help="read replies to the digest and job mail from Gmail now",
                           description="Read new replies to the digest, and job mail (confirmations, rejections, "
@@ -943,7 +948,7 @@ def cmd_backup(args: argparse.Namespace, out: TextIO, err: TextIO, now: datetime
 
 
 def cmd_fit(args: argparse.Namespace, transport: httpx.BaseTransport | None, out: TextIO, err: TextIO,
-            now: datetime) -> int:
+            now: datetime, inp: TextIO) -> int:
     config = _load_config(args.config, err)
     if config is None:
         return 2
@@ -966,6 +971,18 @@ def cmd_fit(args: argparse.Namespace, transport: httpx.BaseTransport | None, out
         print(f"  tokens: {u['input_tokens']} in, {u['cache_creation_input_tokens']} cache written, "
               f"{u['cache_read_input_tokens']} cache read, {u['output_tokens']} out · ${s.working['cost_usd']:.5f}",
               file=out)
+        return 0
+    if args.fit_command in ("rate", "compare"):
+        store = _open_store(args.db, err)
+        if store is None:
+            return 2
+        with store:
+            if args.fit_command == "compare":
+                print("\n".join(fitcompare.report(fitcompare.load(store), now)), file=out)
+                return 0
+            done, total = fitcompare.rate(store, now, inp, out, args.count)
+        print(f"\nRated {done} this time, {total} in all."
+              + (" `jobfeed fit compare` shows how the scorers track your ratings." if total else ""), file=out)
         return 0
     if args.fit_command == "profile":
         with make_client(transport) as client:
@@ -1041,9 +1058,11 @@ def main(
     now: datetime | None = None,
     mailer: Mailer | None = None,
     imap_factory=None,
+    inp: TextIO | None = None,
 ) -> int:
     """`mailer` and `imap_factory` replace Gmail in tests; settings are still read from --env."""
     out = out or sys.stdout
+    inp = inp or sys.stdin
     err = err or sys.stderr
     now = now or utc_now()
     today = now.astimezone().date()
@@ -1073,7 +1092,7 @@ def main(
     if args.command == "backup":
         return cmd_backup(args, out, err, now)
     if args.command == "fit":
-        return cmd_fit(args, transport, out, err, now)
+        return cmd_fit(args, transport, out, err, now, inp)
     if args.command == "mail":
         return cmd_mail(args, out, err, now, imap_factory)
     return cmd_discover(args, transport, out, err)

@@ -35,7 +35,7 @@ Fit scorer:
 | 1. Resume and keyword scorer | **Done** — every digest posting gets a hidden keyword score; `jobfeed fit backfill`, `profile`, `status` |
 | 2. LLM scorer | **Done** — Claude Haiku 5.5 scores each posting too; `jobfeed fit check`; per-run cap and monthly budget |
 | 3. Scores on applications and in the stats | **Done** — applications carry both scores; a split per scorer; which score predicts replies |
-| 4. Ratings and agreement | Next: `jobfeed fit rate` and `jobfeed fit compare` |
+| 4. Ratings and agreement | **Done** — `jobfeed fit rate` (blind 1–5 ratings) and `jobfeed fit compare` |
 | 5. Visible scores | After the baseline |
 
 ## Setup
@@ -434,7 +434,36 @@ Which fit score predicts a reply? (counted applications, split at each score's m
 
 The same rules as every other comparison apply: at least 15 counted applications in each half, and rates outside each other's likely ranges. Expect "too few to tell" for the first couple of months. `--metric screen` asks the same of screens.
 
-None of these commands shows a real posting's score. Your skills come from the resume: the terms it names, basic where its entry says "basic" or "some" (some implied too: PostgreSQL gives SQL, Kubernetes gives Docker). `fit.strong`, `fit.basic` and `fit.extra_skills` override by term name, and `fit.extra_terms` adds terms to the ~70 built in. The digest footer says how many postings were scored; if the resume can't be had at all, that run scores nothing and says why, and `fit backfill` catches up.
+#### Your ratings, and how the scorers compare
+
+Replies take months to say which score is better; your own judgement can say something sooner. `jobfeed fit rate` shows postings from the last 30 days one at a time, with no scores, and asks how strong a candidate you are for each, 1 (not at all) to 5 (an excellent fit). `s` skips one, `q` stops, and the order is shuffled rather than following either score. Each sitting asks for up to 40 (`--count`); ratings are saved as you go, so stopping early loses nothing.
+
+```sh
+.venv/bin/jobfeed fit rate       # rate postings blind, 1–5
+.venv/bin/jobfeed fit compare    # the scorers against each other and against your ratings
+```
+
+```
+Agreement between the scorers (60 postings with both scores)
+  rank correlation 0.48: moderate
+  LLM:      median 57, middle half 34–76, range 8–94
+  keywords: median 62, middle half 51–74, range 31–89
+
+Against your ratings (32 rated)
+  LLM       0.71 (likely 0.53 to 0.83, 32 postings): strong
+  keywords  0.38 (likely 0.10 to 0.61, 32 postings): weak
+  → the LLM tracks your ratings better: by 0.33 (likely 0.12 to 0.55)
+
+Where they disagree most (postings first sent over 14 days ago; 41 so far)
+  Senior Platform Engineer — Acme (sent Nov 3) · you rated it 4
+    LLM 81: Strong Go and Kubernetes match; the Terraform ask is minor.
+    keywords 42: found Go, Kubernetes; missing Terraform, AWS, Rust
+    https://…
+```
+
+The correlations are rank correlations (−1 to 1): how far the postings you rate higher also score higher. The comparison needs 15 ratings, and is only called when its likely range stays on one side of zero; the two scorers are judged on the same postings, so that range comes from resampling them. The disagreement list is the one place a real posting's score appears, so it only lists postings first sent over two weeks ago, too late to steer what you apply to.
+
+None of the other commands shows a real posting's score. Your skills come from the resume: the terms it names, basic where its entry says "basic" or "some" (some implied too: PostgreSQL gives SQL, Kubernetes gives Docker). `fit.strong`, `fit.basic` and `fit.extra_skills` override by term name, and `fit.extra_terms` adds terms to the ~70 built in. The digest footer says how many postings were scored; if the resume can't be had at all, that run scores nothing and says why, and `fit backfill` catches up.
 
 ## Deploy on the Pi
 
