@@ -80,3 +80,10 @@ aggregators:
   # Greenhouse, Lever or Ashby board, add that company to companies.yaml
   # (origin: harvested) so its board is polled from the next run.
   harvest: true
+
+tracking:
+  # Recorded on every application you log with `jobfeed apply`, so the stats can
+  # compare versions later. Change it when you start sending a new resume, or
+  # pass --resume on one application to try a version out.
+  resume_version: v1
+  cover_letter: false   # true if you usually send one; --cover-letter / --no-cover-letter per application

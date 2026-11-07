@@ -78,6 +78,12 @@ class AggregatorRules:
 
 
 @dataclass
+class TrackingRules:
+    resume_version: str = "v1"     # recorded on each `jobfeed apply` unless --resume says otherwise
+    cover_letter: bool = False     # whether you usually send one; --cover-letter / --no-cover-letter override
+
+
+@dataclass
 class Config:
     role: RoleRules = field(default_factory=RoleRules)
     location: LocationRules = field(default_factory=LocationRules)
@@ -85,10 +91,12 @@ class Config:
     seniority: SeniorityRules = field(default_factory=SeniorityRules)
     digest: DigestRules = field(default_factory=DigestRules)
     aggregators: AggregatorRules = field(default_factory=AggregatorRules)
+    tracking: TrackingRules = field(default_factory=TrackingRules)
 
 
 _SECTIONS = {"role": RoleRules, "location": LocationRules, "salary": SalaryRules,
-             "seniority": SeniorityRules, "digest": DigestRules, "aggregators": AggregatorRules}
+             "seniority": SeniorityRules, "digest": DigestRules, "aggregators": AggregatorRules,
+             "tracking": TrackingRules}
 _REGIONS = {"us", "americas", "global", "other", "unknown"}
 _RANKS = {"junior", "mid", "senior", "staff", "principal"}
 
@@ -156,6 +164,9 @@ def _validate(cfg: Config) -> None:
         raise ConfigError("`aggregators.remotive_category` is empty; use `all`, or set `remotive: false`")
     if agg.himalayas and not agg.himalayas_queries:
         raise ConfigError("`aggregators.himalayas_queries` is empty; add a query, or set `himalayas: false`")
+    cfg.tracking.resume_version = cfg.tracking.resume_version.strip()
+    if not cfg.tracking.resume_version:
+        raise ConfigError("`tracking.resume_version` is empty; name the resume you send, e.g. v1")
 
 
 def load_config(path: Path = DEFAULT_PATH) -> Config:

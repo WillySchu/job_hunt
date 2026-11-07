@@ -57,7 +57,7 @@ Every move is a dated event, so the time between stages is measurable too. Only 
 
 There are four ways in, and all four lead to the same record. Anything logged since the last run is confirmed at the top of the next digest.
 
-1. **A code from the digest.** Each digest entry shows a number such as `#412`, assigned when the posting is first emailed. On the Pi, `jobfeed apply 412` logs it. Several at once: `jobfeed apply 412 418`. Options: `--resume v2`, `--cover-letter`, `--referral`.
+1. **A code from the digest.** Each digest entry shows a number such as `#412`, assigned when the posting is first emailed. On the Pi, `jobfeed apply 412` logs it. Several at once: `jobfeed apply 412 418`. Options: `--resume v2`, `--cover-letter` / `--no-cover-letter`, `--referral`, `--date 2026-11-05` for an application made on an earlier day, and `--note`. The resume and cover-letter defaults come from the `tracking` section of `config.yaml`.
 2. **A reply to the digest.** Reply to a morning email with one command per line, and the next run reads it:
 
    ```
@@ -70,12 +70,12 @@ There are four ways in, and all four lead to the same record. Anything logged si
    ```
 
    Only replies from your own addresses (`GMAIL_USER` or `DIGEST_TO`) count, and the quoted original below your reply is ignored. Any line it can't read is quoted back in the next digest.
-3. **Manual entry** for roles found elsewhere: `jobfeed apply --url https://… --company Acme --title "Senior Backend Engineer" --via referral`. It gets the next code. If the link matches a posting jobfeed has stored, the posting's fields are copied in.
+3. **Manual entry** for roles found elsewhere: `jobfeed apply --url https://… --company Acme --title "Senior Backend Engineer" --via referral`. It gets the next code. If the link matches a posting jobfeed has stored (ignoring any `?query` or `#fragment`), the posting's fields are copied in and `--company`, `--title` and `--via` aren't needed.
 4. **Confirmation emails.** When a Greenhouse, Lever or Ashby "thanks for applying" email arrives for a role you haven't logged, jobfeed creates the application, matched to a stored posting where it can. The digest lists these so you can add a resume version or fix a wrong match.
 
 A role logged twice, say by code and then by its confirmation email, stays one application; the confirmation becomes an event on it.
 
-The other commands: `jobfeed mark 412 screen` sets any stage, `jobfeed note 412 …` adds a note, and `jobfeed apps` lists open applications (`--all` includes closed ones).
+The other commands: `jobfeed mark 412 screen` sets any stage (with `--date` and `--note`), `jobfeed note 412 …` adds a note, `jobfeed apps` lists open applications (`--all` includes closed ones), `jobfeed apps 412` shows one with its history, and `jobfeed undo 412` removes the last entry made for an application, or the application itself when that's all there is.
 
 ## Reading Gmail
 
@@ -149,6 +149,7 @@ Three new tables join `jobs` in `jobs.db`, and jobfeed upgrades an existing data
 ```sql
 -- schema 3
 ALTER TABLE jobs ADD COLUMN code INTEGER;      -- digest number, set when a posting is first emailed
+ALTER TABLE jobs ADD COLUMN section TEXT;      -- the digest section it was emailed in
 CREATE UNIQUE INDEX jobs_code ON jobs(code);
 
 CREATE TABLE applications (
@@ -219,7 +220,7 @@ Each phase changes one thing, so its effect can be read against the applications
 
 Tracking starts with milestone 1, so the baseline can begin while the rest is built. Milestones 1 and 2 need no inbox access. By milestone 4, a few weeks of real job mail will have arrived to test the rules against.
 
-- [ ] **1. Applications and codes.** Schema 3, digest codes (`#412`), and `jobfeed apply`, `mark`, `note` and `apps`. Done when you can log today's applications.
+- [x] **1. Applications and codes.** Schema 3, digest codes (`#412`), and `jobfeed apply`, `mark`, `note`, `apps` and `undo`. Done when you can log today's applications.
 - [ ] **2. Daily follow-ups.** The "Your applications" block in the digest, the 10-day follow-up and the 21-day "no response" rule.
 - [ ] **3. Gmail reader and replies.** Read-only IMAP, `mail_seen`, and digest replies run as commands. Done when a reply to the digest logs an application.
 - [ ] **4. Mail classifier.** Confirmation, rejection, interview, offer and other reply; matching mail to applications; the "Check these" list; and `jobfeed mail --dry-run`, which shows how each recent message would be read without acting on it.

@@ -1,4 +1,4 @@
-"""jobs.db: every posting ever fetched, when it was first and last seen, and when it was sent."""
+"""jobs.db: every posting ever fetched, when it was first and last seen and sent, plus applications."""
 
 from __future__ import annotations
 
@@ -8,11 +8,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import urlsplit, urlunsplit
 
 from jobfeed.models import Job
 
 DEFAULT_PATH = Path("jobs.db")
-SCHEMA_VERSION = 2  # 2: board_runs
+SCHEMA_VERSION = 3  # 2: board_runs; 3: digest codes, applications, events, mail_seen
+FIRST_CODE = 101   # digest codes start here, so every code has at least three digits
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -32,11 +34,58 @@ CREATE TABLE IF NOT EXISTS board_runs (
   error     TEXT,               -- NULL when the fetch worked
   PRIMARY KEY (label, run_at)
 );
+CREATE TABLE IF NOT EXISTS applications (
+  code            INTEGER PRIMARY KEY,         -- the posting's digest number, or the next free one
+  job_id          TEXT REFERENCES jobs(id),    -- NULL for roles found outside jobfeed
+  company         TEXT NOT NULL,
+  title           TEXT NOT NULL,
+  url             TEXT,
+  found_via       TEXT NOT NULL,   -- greenhouse | remotive | ... | referral | linkedin | recruiter | other
+  digest_section  TEXT,            -- watchlist | matches | no_salary
+  referral        INTEGER NOT NULL DEFAULT 0,
+  resume_version  TEXT,
+  cover_letter    INTEGER NOT NULL DEFAULT 0,
+  autofilled      INTEGER,         -- NULL until form filling exists
+  fit_score       REAL,            -- NULL until the scorer exists
+  first_seen      TEXT,            -- copied from jobs, for days to apply
+  applied_at      TEXT NOT NULL,
+  logged_via      TEXT NOT NULL,   -- code | reply | manual | confirmation
+  stage           TEXT NOT NULL,   -- latest stage, derived from events
+  stage_at        TEXT NOT NULL,
+  notes           TEXT
+);
+CREATE TABLE IF NOT EXISTS events (
+  id          INTEGER PRIMARY KEY,
+  code        INTEGER NOT NULL REFERENCES applications(code),
+  at          TEXT NOT NULL,
+  kind        TEXT NOT NULL,   -- applied | reply | screen | interview | offer | accepted | declined
+                               -- | rejected | withdrawn | no_response | reopened | note
+  origin      TEXT NOT NULL,   -- cli | reply | email | rule
+  message_id  TEXT,            -- the Gmail message it came from
+  detail      TEXT             -- the stage a rejection came at, or a note's text
+);
+CREATE INDEX IF NOT EXISTS events_code ON events(code, at);
+CREATE TABLE IF NOT EXISTS mail_seen (
+  message_id  TEXT PRIMARY KEY,   -- Gmail's ID, so a message is never counted twice
+  seen_at     TEXT NOT NULL,
+  kind        TEXT,               -- what it was read as; NULL if ignored
+  code        INTEGER             -- the application it was tied to
+);
 """
+
+# Columns added to `jobs` after it was first created, and when.
+_JOB_COLUMNS = [
+    ("code", "INTEGER"),     # 3: digest number, set when a posting is first emailed
+    ("section", "TEXT"),     # 3: digest section it was emailed in
+]
 
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(microsecond=0)
+
+
+def _job_columns(conn: sqlite3.Connection) -> set[str]:
+    return {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
 
 
 def _ts(moment: datetime) -> str:
@@ -52,6 +101,8 @@ class Row:
     last_seen: datetime
     matched: bool
     emailed_at: datetime | None
+    code: int | None = None
+    section: str | None = None
 
 
 class StoreError(Exception):
@@ -63,6 +114,8 @@ class Store:
         self.conn = conn
         self.path = path
         self.readonly = readonly
+        # A read-only open of an older database may lack the newer columns and tables.
+        self.has_codes = "code" in _job_columns(conn)
 
     # --- opening ------------------------------------------------------------
 
@@ -76,6 +129,11 @@ class Store:
                 conn.close()
                 raise StoreError(f"{path} was written by a newer jobfeed (schema {version}); upgrade jobfeed")
             conn.executescript(_SCHEMA)
+            present = _job_columns(conn)
+            for name, kind in _JOB_COLUMNS:
+                if name not in present:
+                    conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {kind}")
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS jobs_code ON jobs(code)")
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             conn.commit()
         except sqlite3.DatabaseError as exc:
@@ -107,7 +165,7 @@ class Store:
 
     def _rows(self, sql: str, params: Iterable = ()) -> list[Row]:
         out = []
-        for id_, key, first, last, matched, emailed, data in self.conn.execute(sql, tuple(params)):
+        for id_, key, first, last, matched, emailed, data, code, section in self.conn.execute(sql, tuple(params)):
             out.append(Row(
                 job=Job.from_dict(json.loads(data)),
                 dedupe_key=key,
@@ -115,10 +173,15 @@ class Store:
                 last_seen=datetime.fromisoformat(last),
                 matched=bool(matched),
                 emailed_at=datetime.fromisoformat(emailed) if emailed else None,
+                code=code,
+                section=section,
             ))
         return out
 
-    _COLUMNS = "id, dedupe_key, first_seen, last_seen, matched, emailed_at, data"
+    @property
+    def _COLUMNS(self) -> str:
+        extra = "code, section" if self.has_codes else "NULL, NULL"
+        return f"id, dedupe_key, first_seen, last_seen, matched, emailed_at, data, {extra}"
 
     def get(self, ids: Iterable[str]) -> dict[str, Row]:
         ids = list(ids)
@@ -166,6 +229,28 @@ class Store:
     def count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
 
+    def by_code(self, code: int) -> Row | None:
+        if not self.has_codes:
+            return None
+        rows = self._rows(f"SELECT {self._COLUMNS} FROM jobs WHERE code = ?", (code,))
+        return rows[0] if rows else None
+
+    def by_url(self, url: str) -> Row | None:
+        """The stored posting whose link, or company-board link, is this URL (query string ignored)."""
+        want = normalize_url(url)
+        if not want:
+            return None
+        # Narrow with LIKE on the path, then compare normalized links exactly.
+        # (`_` and `%` in the pattern only widen the net; the exact check decides.)
+        base = want.split("://", 1)[-1]
+        sql = (f"SELECT {self._COLUMNS} FROM jobs WHERE json_extract(data, '$.url') LIKE ? "
+               "OR json_extract(data, '$.apply_url') LIKE ? ORDER BY last_seen DESC")
+        pattern = f"%{base}%"
+        for row in self._rows(sql, (pattern, pattern)):
+            if want in (normalize_url(row.job.url), normalize_url(row.job.apply_url or "")):
+                return row
+        return None
+
     # --- writes ---------------------------------------------------------------
 
     def _writable(self) -> None:
@@ -174,32 +259,93 @@ class Store:
 
     def save_run(self, jobs: list[tuple[Job, str, bool]], sent_ids: Iterable[str], now: datetime,
                  boards: Iterable[tuple[str, int, str | None]] = ()) -> None:
-        """Upsert this run's postings and mark the sent ones, in one transaction.
+        """save_jobs and mark_sent in one transaction."""
+        self._writable()
+        with self.conn:
+            self._save_jobs(jobs, now)
+            self._mark_sent(sent_ids, now, boards)
 
-        jobs: (job, dedupe_key, matched). New rows get first_seen = now; known rows
-        keep first_seen and emailed_at and get the latest content and last_seen.
+    def save_jobs(self, jobs: list[tuple[Job, str, bool]], now: datetime) -> None:
+        """Upsert this run's postings: (job, dedupe_key, matched).
+
+        New rows get first_seen = now; known rows keep first_seen, emailed_at
+        and their digest code, and get the latest content and last_seen.
         """
         self._writable()
-        stamp = _ts(now)
         with self.conn:
-            self.conn.executemany(
-                """
-                INSERT INTO jobs (id, dedupe_key, first_seen, last_seen, matched, emailed_at, data)
-                VALUES (?, ?, ?, ?, ?, NULL, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                  dedupe_key = excluded.dedupe_key,
-                  last_seen  = excluded.last_seen,
-                  matched    = excluded.matched,
-                  data       = excluded.data
-                """,
-                [(job.id, key, stamp, stamp, int(matched), json.dumps(job.to_dict(), ensure_ascii=False))
-                 for job, key, matched in jobs],
-            )
-            self.conn.executemany(
-                "UPDATE jobs SET emailed_at = ? WHERE id = ? AND emailed_at IS NULL",
-                [(stamp, id_) for id_ in sent_ids],
-            )
-            self.conn.executemany(
-                "INSERT OR REPLACE INTO board_runs (label, run_at, postings, error) VALUES (?, ?, ?, ?)",
-                [(label, stamp, postings, error) for label, postings, error in boards],
-            )
+            self._save_jobs(jobs, now)
+
+    def mark_sent(self, sent_ids: Iterable[str], now: datetime,
+                  boards: Iterable[tuple[str, int, str | None]] = ()) -> None:
+        """Mark postings as emailed (keeping any earlier date) and log each board's count."""
+        self._writable()
+        with self.conn:
+            self._mark_sent(sent_ids, now, boards)
+
+    def next_code(self) -> int:
+        top = self.conn.execute(
+            "SELECT MAX(c) FROM (SELECT MAX(code) AS c FROM jobs UNION ALL SELECT MAX(code) FROM applications)"
+        ).fetchone()[0]
+        return max((top or 0) + 1, FIRST_CODE)
+
+    def assign_codes(self, items: list[tuple[str, str | None]]) -> dict[str, int]:
+        """Give each posting a digest code, in the order given; postings that have one keep it.
+
+        items: (job id, digest section). Returns job id -> code for every item.
+        The postings must already be saved.
+        """
+        self._writable()
+        codes: dict[str, int] = {}
+        with self.conn:
+            for job_id, section in items:
+                row = self.conn.execute("SELECT code FROM jobs WHERE id = ?", (job_id,)).fetchone()
+                if row is None:
+                    raise StoreError(f"posting {job_id} isn't saved yet")
+                if row[0] is None:
+                    code = self.next_code()
+                    self.conn.execute("UPDATE jobs SET code = ?, section = ? WHERE id = ?", (code, section, job_id))
+                    codes[job_id] = code
+                else:
+                    codes[job_id] = row[0]
+        return codes
+
+    def _save_jobs(self, jobs: list[tuple[Job, str, bool]], now: datetime) -> None:
+        stamp = _ts(now)
+        self.conn.executemany(
+            """
+            INSERT INTO jobs (id, dedupe_key, first_seen, last_seen, matched, emailed_at, data)
+            VALUES (?, ?, ?, ?, ?, NULL, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              dedupe_key = excluded.dedupe_key,
+              last_seen  = excluded.last_seen,
+              matched    = excluded.matched,
+              data       = excluded.data
+            """,
+            [(job.id, key, stamp, stamp, int(matched), json.dumps(job.to_dict(), ensure_ascii=False))
+             for job, key, matched in jobs],
+        )
+
+    def _mark_sent(self, sent_ids: Iterable[str], now: datetime,
+                   boards: Iterable[tuple[str, int, str | None]]) -> None:
+        stamp = _ts(now)
+        self.conn.executemany(
+            "UPDATE jobs SET emailed_at = ? WHERE id = ? AND emailed_at IS NULL",
+            [(stamp, id_) for id_ in sent_ids],
+        )
+        self.conn.executemany(
+            "INSERT OR REPLACE INTO board_runs (label, run_at, postings, error) VALUES (?, ?, ?, ?)",
+            [(label, stamp, postings, error) for label, postings, error in boards],
+        )
+
+
+def normalize_url(url: str | None) -> str:
+    """Scheme, host and path only, lower-case host, no trailing slash: for matching links."""
+    if not url:
+        return ""
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return ""
+    if not parts.netloc:
+        return ""
+    return urlunsplit(("https", parts.netloc.lower(), parts.path.rstrip("/"), "", ""))

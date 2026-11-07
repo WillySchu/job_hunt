@@ -13,6 +13,7 @@ from jobfeed.sources import AGGREGATORS, SOURCE_NAMES
 
 MAX_LOCATION_CHARS = 70
 MAX_LISTED_PROBLEMS = 15
+APPLY_HINT = "Applied to one? Log it on the Pi with: jobfeed apply CODE"
 
 
 # --- pieces of an entry --------------------------------------------------------------
@@ -145,12 +146,17 @@ def build_health(results, plan, previous: dict[str, int]) -> Health:
 # --- plain text -------------------------------------------------------------------
 
 def render_text(digest: Digest, today: date, *, health: Health | None = None, show_dropped: bool = False,
-                noun: str = "new", overflow_hint: str = " (raise digest.max_per_section or use --limit 0)") -> str:
+                noun: str = "new", overflow_hint: str = " (raise digest.max_per_section or use --limit 0)",
+                codes: dict[str, int] | None = None) -> str:
+    """codes: job id -> digest code, shown before each title (none in a dry run)."""
+    codes = codes or {}
     watch = len(digest.sections[WATCHLIST]) + digest.hidden.get(WATCHLIST, 0)
     label = "Job feed" if noun == "new" else "Job feed replay"
     lines = [f"{label} · {date_label(today)} · {digest.matched} {noun} ({watch} watchlist)"]
     if not digest.matched:
         lines += ["", "Nothing new matched." if noun == "new" else "Nothing matched."]
+    elif codes and noun == "new":
+        lines += ["", APPLY_HINT]
     for name in SECTION_ORDER:
         entries = digest.sections[name]
         hidden = digest.hidden.get(name, 0)
@@ -158,7 +164,8 @@ def render_text(digest: Digest, today: date, *, health: Health | None = None, sh
             continue
         lines += ["", f"== {SECTION_TITLES[name]} ({len(entries) + hidden})"]
         for entry in entries:
-            lines += [f"  {entry.job.title} — {' · '.join(headline_parts(entry.job))}",
+            code = codes.get(entry.job.id)
+            lines += [f"  {'#' + str(code) + ' ' if code else ''}{entry.job.title} — {' · '.join(headline_parts(entry.job))}",
                       f"      {' · '.join(detail_parts(entry))}",
                       f"      {entry.job.url}"]
         if hidden:
@@ -190,19 +197,23 @@ def _e(text: str) -> str:
     return html.escape(text, quote=True)
 
 
-def _entry_html(entry: Entry) -> str:
+def _entry_html(entry: Entry, code: int | None = None) -> str:
     job = entry.job
     head = " · ".join(_e(p) for p in headline_parts(job))
     detail = " · ".join(_e(p) for p in detail_parts(entry))
     link = (f'<a href="{_e(job.url)}" style="color:{_ACCENT};text-decoration:none;font-weight:600">'
             f'{_e(job.title)}</a>') if job.url else f'<strong>{_e(job.title)}</strong>'
+    tag = (f'<span style="color:{_QUIET};font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">'
+           f'#{code}</span> ') if code else ""
     return (f'<tr><td style="padding:10px 0;border-bottom:1px solid {_RULE};{_FONT}">'
-            f'<div style="font-size:15px;line-height:1.4;color:{_INK}">{link} — {head}</div>'
+            f'<div style="font-size:15px;line-height:1.4;color:{_INK}">{tag}{link} — {head}</div>'
             f'<div style="font-size:13px;line-height:1.4;color:{_QUIET};margin-top:2px">{detail}</div>'
             "</td></tr>")
 
 
-def render_html(digest: Digest, today: date, *, health: Health | None = None) -> str:
+def render_html(digest: Digest, today: date, *, health: Health | None = None,
+                codes: dict[str, int] | None = None) -> str:
+    codes = codes or {}
     watch = len(digest.sections[WATCHLIST]) + digest.hidden.get(WATCHLIST, 0)
     body: list[str] = [
         f'<div style="{_FONT}font-size:20px;font-weight:600;color:{_INK};margin:0 0 4px">Job feed · '
@@ -212,6 +223,8 @@ def render_html(digest: Digest, today: date, *, health: Health | None = None) ->
     ]
     if not digest.matched:
         body.append(f'<p style="{_FONT}font-size:15px;color:{_INK}">Nothing new matched today.</p>')
+    elif codes:
+        body.append(f'<p style="{_FONT}font-size:13px;color:{_QUIET};margin:0 0 8px">{_e(APPLY_HINT)}</p>')
     for name in SECTION_ORDER:
         entries = digest.sections[name]
         hidden = digest.hidden.get(name, 0)
@@ -221,7 +234,7 @@ def render_html(digest: Digest, today: date, *, health: Health | None = None) ->
                     f'border-bottom:2px solid {_INK}">{_e(SECTION_TITLES[name])} ({len(entries) + hidden})</h2>')
         body.append('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
                     'style="border-collapse:collapse">')
-        body += [_entry_html(e) for e in entries]
+        body += [_entry_html(e, codes.get(e.job.id)) for e in entries]
         body.append("</table>")
         if hidden:
             body.append(f'<p style="{_FONT}font-size:13px;color:{_QUIET}">… {hidden} more not shown; '

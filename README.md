@@ -1,6 +1,6 @@
 # jobfeed
 
-A daily email digest of new software engineering postings that are remote or in the Seattle area, built to run every morning on a Raspberry Pi as a systemd timer. The full design is in [JOB_FEED_SPEC.md](JOB_FEED_SPEC.md).
+A daily email digest of new software engineering postings that are remote or in the Seattle area, built to run every morning on a Raspberry Pi as a systemd timer, plus a tracker for the applications you send. The designs are in [JOB_FEED_SPEC.md](JOB_FEED_SPEC.md) and [APPLICATION_TRACKER_SPEC.md](APPLICATION_TRACKER_SPEC.md).
 
 ## Status
 
@@ -14,6 +14,14 @@ A daily email digest of new software engineering postings that are remote or in 
 | 6. Aggregators | **Done** — Remotive, Remote OK and Himalayas; harvesting company boards from their links |
 | 7. Email | **Done** — HTML and text digest through Gmail, run-health footer, `send-test` |
 | 8. Deploy | **Built** — systemd service and 6:00 timer, `deploy/install.sh`; then a week of tuning |
+
+Application tracker:
+
+| Milestone | State |
+| --- | --- |
+| 1. Applications and codes | **Done** — schema 3, digest codes, `apply`, `mark`, `note`, `apps`, `undo` |
+| 2. Daily follow-ups | Next |
+| 3–8 | Gmail reader, mail classifier, stats, weekly email and backups, checking, LinkedIn confirmations |
 
 ## Setup
 
@@ -146,7 +154,7 @@ If Gmail can't be reached, `run` retries twice, then exits with status 1 and mar
 - `--html FILE` also writes the email's HTML, to open in a browser. It works with `--dry-run` too.
 - `--dry-run` never sends and never writes. It needs no `.env`.
 
-To start over, delete `jobs.db`.
+To start the feed over, delete `jobs.db`, but once you're tracking applications it holds their history too, so move it aside rather than deleting it.
 
 The summary on stderr counts what was skipped and why:
 
@@ -184,6 +192,48 @@ jq -r '[.location_raw, .work_mode, (.remote_region // "-"), (.cities | join("; "
 ```
 
 A wrong reading is worth a new case in `tests/test_normalize_location.py` or `tests/test_normalize_salary.py`.
+
+### Track applications
+
+Every posting in the digest has a code, like `#412`, given when it's first emailed and kept for good. When you apply to one, log it on the Pi (from the repo directory, or pass `--db`):
+
+```sh
+.venv/bin/jobfeed apply 412                        # one posting
+.venv/bin/jobfeed apply 412 418 --date 2026-11-05  # several, applied on an earlier day
+.venv/bin/jobfeed apply 430 --resume v2 --cover-letter --referral --note "Sam referred me"
+```
+
+Each application records the resume version and whether you sent a cover letter. The defaults are `tracking.resume_version` and `tracking.cover_letter` in `config.yaml`; change `resume_version` when you start sending a new resume, and pass `--resume` to try a version on one application.
+
+For a role you found somewhere else, log it by its link. If jobfeed has the posting stored (the query string doesn't matter), the posting's details are copied in; otherwise give the company and title, and it gets the next free code:
+
+```sh
+.venv/bin/jobfeed apply --url https://www.linkedin.com/jobs/view/123 --company Acme --title "Senior Backend Engineer" --via referral
+```
+
+`--via` is `referral`, `linkedin`, `recruiter` or `other` (the default, or `referral` with `--referral`).
+
+Then record what happens:
+
+```sh
+.venv/bin/jobfeed mark 412 reply         # a first response; the stage stays the same
+.venv/bin/jobfeed mark 412 screen        # recruiter or phone screen
+.venv/bin/jobfeed mark 412 interview     # onsite and technical count as interview
+.venv/bin/jobfeed mark 412 offer
+.venv/bin/jobfeed mark 412 rejected --date 2026-11-12 --note "wanted more Go"
+.venv/bin/jobfeed note 412 recruiter call Tue 2pm
+```
+
+The other stages are `accepted`, `declined`, `withdrawn` (or `withdrew`), `no-response` (or `ghosted`; only from applied) and `reopen`, which returns a closed application to the stage it had reached. A reply to one marked as no response reopens it too.
+
+```sh
+.venv/bin/jobfeed apps          # open applications, newest first
+.venv/bin/jobfeed apps --all    # closed ones too
+.venv/bin/jobfeed apps 412      # one application and its history
+.venv/bin/jobfeed undo 412      # remove the last entry made for it, or the application if that's all there is
+```
+
+Every change is kept as a dated entry, and the stage is worked out from those entries, so `undo` and a late `--date` always leave it right. `apply` exits with status 1 if any code couldn't be logged (the others are still logged) and 2 for a usage mistake.
 
 ## Deploy on the Pi
 
@@ -232,7 +282,8 @@ How the timer and service behave:
 jobfeed/
   cli.py            # argparse entry point; digest preview rendering
   config.py         # config.yaml loader and validation
-  store.py          # jobs.db: postings, first/last seen, sent
+  store.py          # jobs.db: postings, first/last seen, sent, digest codes
+  tracker.py        # applications and their events: apply, mark, note, list, undo
   dedupe.py         # what a run sends: skip sent, one copy per role, 30-day window
   digest.py         # subject, text and HTML bodies, run-health footer
   mailer.py         # .env settings; Gmail SMTP with STARTTLS and retries
@@ -264,5 +315,6 @@ deploy/
 tests/              # pytest, no network: httpx.MockTransport + fixtures
 config.yaml         # filter rules
 companies.yaml      # seed list and watchlist
-JOB_FEED_SPEC.md    # design
+JOB_FEED_SPEC.md    # job feed design
+APPLICATION_TRACKER_SPEC.md   # application tracker design
 ```

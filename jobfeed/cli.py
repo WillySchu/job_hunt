@@ -1,4 +1,5 @@
-"""Command-line entry point: `jobfeed run`, `replay`, `discover` and `send-test`."""
+"""Command-line entry point: `jobfeed run`, `replay`, `discover`, `send-test`, and the tracker commands
+(`apply`, `mark`, `note`, `apps`, `undo`)."""
 
 from __future__ import annotations
 
@@ -20,13 +21,15 @@ from jobfeed.dedupe import Plan, plan_run
 from jobfeed.digest import Health, build_health, render_html, render_text, subject
 from jobfeed.discover import HARVEST_HEADER, Discovery, EditError, discover_all, update_companies_file
 from jobfeed.harvest import harvest
-from jobfeed.filters import Digest
+from jobfeed.filters import SECTION_TITLES, Digest
 from jobfeed.http import make_client
 from jobfeed.models import Job
 from jobfeed.mailer import DEFAULT_ENV, GmailMailer, MailConfigError, Mailer, SendError, build_message, load_settings
-from jobfeed.sources import SOURCES, Board, FetchResult, fetch_all
+from jobfeed.sources import SOURCE_NAMES, SOURCES, Board, FetchResult, fetch_all
 from jobfeed.store import DEFAULT_PATH as DB_PATH
 from jobfeed.store import Store, StoreError, utc_now
+from jobfeed import tracker
+from jobfeed.tracker import TrackerError
 
 def _parse_board(spec: str) -> Board:
     source, sep, slug = spec.partition(":")
@@ -87,13 +90,67 @@ def build_parser() -> argparse.ArgumentParser:
 
     test = sub.add_parser("send-test", help="email a short test message, to check the Gmail settings")
     test.add_argument("--env", type=Path, default=DEFAULT_ENV, help="file with the Gmail settings (default .env)")
+
+    _tracker_parsers(sub)
     return parser
+
+
+def _code(text: str) -> int:
+    value = text.removeprefix("#")
+    if not value.isdigit():
+        raise argparse.ArgumentTypeError(f"'{text}' isn't a code; codes are the numbers in the digest, like 412")
+    return int(value)
+
+
+def _tracker_parsers(sub) -> None:
+    db = argparse.ArgumentParser(add_help=False)
+    db.add_argument("--db", type=Path, default=DB_PATH, help="path to jobs.db")
+    dated = argparse.ArgumentParser(add_help=False)
+    dated.add_argument("--date", metavar="YYYY-MM-DD", help="when it happened, if not today")
+
+    apply = sub.add_parser(
+        "apply", parents=[db, dated], help="log an application, by its digest code or with --url",
+        description="Log applications. `jobfeed apply 412 415` logs two postings from the digest; "
+                    "`jobfeed apply --url URL` logs one by its link, and needs --company and --title "
+                    "when jobfeed never saw the posting.")
+    apply.add_argument("codes", nargs="*", type=_code, metavar="CODE", help="digest codes, e.g. 412")
+    apply.add_argument("--url", help="the posting's link, for a role without a code")
+    apply.add_argument("--company", default="", help="company, for a role jobfeed never saw")
+    apply.add_argument("--title", default="", help="job title, for a role jobfeed never saw")
+    apply.add_argument("--via", choices=tracker.VIA_CHOICES, default=None,
+                       help="where you found a role jobfeed never saw (default: referral with --referral, else other)")
+    apply.add_argument("--resume", metavar="VERSION", help="resume version sent (default: tracking.resume_version)")
+    apply.add_argument("--cover-letter", action=argparse.BooleanOptionalAction, default=None,
+                       help="whether you sent a cover letter (default: tracking.cover_letter)")
+    apply.add_argument("--referral", action="store_true", help="someone referred you")
+    apply.add_argument("--note", help="a note to keep with the application")
+    apply.add_argument("--config", type=Path, default=CONFIG_PATH, help="path to config.yaml")
+
+    stages = ", ".join(k.replace("_", "-") for k in tracker.MARKABLE if k != "reopened") + ", reopen"
+    mark = sub.add_parser("mark", parents=[db, dated], help="record a reply or a new stage for an application",
+                          description=f"Record what happened. STAGE is one of: {stages}. "
+                                      "onsite and technical count as interview; ghosted as no-response.")
+    mark.add_argument("code", type=_code, metavar="CODE")
+    mark.add_argument("stage", metavar="STAGE")
+    mark.add_argument("--note", help="a note to keep with it")
+
+    note = sub.add_parser("note", parents=[db], help="add a note to an application")
+    note.add_argument("code", type=_code, metavar="CODE")
+    note.add_argument("text", nargs="+", metavar="TEXT")
+
+    apps = sub.add_parser("apps", parents=[db], help="list open applications, or show one's history")
+    apps.add_argument("code", nargs="?", type=_code, metavar="CODE", help="show this application in full")
+    apps.add_argument("--all", action="store_true", help="include closed applications")
+
+    undo = sub.add_parser("undo", parents=[db], help="remove an application's latest entry")
+    undo.add_argument("code", type=_code, metavar="CODE")
 
 
 # --- rendering -------------------------------------------------------------
 
-def render_digest(digest: Digest, *, show_dropped: bool, today: date, out: TextIO, noun: str = "new") -> None:
-    print(render_text(digest, today, show_dropped=show_dropped, noun=noun), file=out)
+def render_digest(digest: Digest, *, show_dropped: bool, today: date, out: TextIO, noun: str = "new",
+                  codes: dict[str, int] | None = None) -> None:
+    print(render_text(digest, today, show_dropped=show_dropped, noun=noun, codes=codes), file=out)
 
 
 def _drop_summary(digest: Digest) -> str:
@@ -204,14 +261,23 @@ def cmd_run(args: argparse.Namespace, transport: httpx.BaseTransport | None, out
         plan = plan_run(jobs, config, watched=_watched(args.companies, boards), store=store, now=now)
         previous = store.previous_counts(r.board.label for r in results) if store else {}
         health = build_health(results, plan, previous)
+
+        # Save postings first, so the ones in this digest can get their codes
+        # before it's rendered. A dry run writes nothing and shows no codes.
+        codes: dict[str, int] = {}
+        if write:
+            store.save_jobs([(j, plan.keys[j.id], plan.matched[j.id]) for j in jobs], now)
+            codes = store.assign_codes([(e.job.id, name) for name, entries in plan.digest.sections.items()
+                                        for e in entries])
+
         if not email:
-            render_digest(plan.digest, show_dropped=args.all, today=today, out=out)
+            render_digest(plan.digest, show_dropped=args.all, today=today, out=out, codes=codes)
         _summary(plan, args, err)
         _print_fetch_summary(results, err)
         for label, had in health.went_empty:
             print(f"  NOW EMPTY {label}: had {had} postings last run", file=err)
         if args.html:
-            args.html.write_text(render_html(plan.digest, today, health=health))
+            args.html.write_text(render_html(plan.digest, today, health=health, codes=codes))
             print(f"wrote the email's HTML to {args.html}", file=err)
 
         sent = plan.to_send
@@ -220,8 +286,9 @@ def cmd_run(args: argparse.Namespace, transport: httpx.BaseTransport | None, out
             title = subject(plan.digest, today)
             to = ", ".join(settings.to)
             msg = build_message(settings, title,
-                                render_text(plan.digest, today, health=health, overflow_hint="; they lead the next digest"),
-                                render_html(plan.digest, today, health=health))
+                                render_text(plan.digest, today, health=health, codes=codes,
+                                            overflow_hint="; they lead the next digest"),
+                                render_html(plan.digest, today, health=health, codes=codes))
             try:
                 mailer.send(msg)
                 print(f"emailed \"{title}\" to {to}", file=err)
@@ -231,7 +298,7 @@ def cmd_run(args: argparse.Namespace, transport: httpx.BaseTransport | None, out
                 sent, status = [], 1
         if write:
             board_log = [(r.board.label, len(r.jobs), r.error) for r in results]
-            store.save_run([(j, plan.keys[j.id], plan.matched[j.id]) for j in jobs], sent, now, board_log)
+            store.mark_sent(sent, now, board_log)
             print(f"saved {len(jobs)} postings to {args.db} · marked {len(sent)} as sent", file=err)
         if config.aggregators.harvest:
             _harvest(jobs, config, args, write=write, err=err)
@@ -316,6 +383,7 @@ def cmd_replay(args: argparse.Namespace, out: TextIO, err: TextIO, today: date, 
     _apply_limit(config, args.limit)
 
     sent_on: dict[str, datetime] = {}
+    codes: dict[str, int] = {}
     if args.source_file is not None:
         try:
             jobs = read_jobs(args.source_file)
@@ -338,6 +406,7 @@ def cmd_replay(args: argparse.Namespace, out: TextIO, err: TextIO, today: date, 
             rows = store.all_rows(seen_since=since)
         jobs = [r.job for r in rows]
         sent_on = {r.job.id: r.emailed_at for r in rows if r.emailed_at}
+        codes = {r.job.id: r.code for r in rows if r.code is not None}
         origin = str(args.db) + (f" (seen in the last {args.days} days)" if args.days else "")
 
     # Replay shows the rules' full picture: sent postings stay in, tagged with their send date.
@@ -346,7 +415,7 @@ def cmd_replay(args: argparse.Namespace, out: TextIO, err: TextIO, today: date, 
         for entry in entries:
             if sent := sent_on.get(entry.job.id):
                 entry.verdict.tags.append(f"sent {sent.date().isoformat()}")
-    render_digest(plan.digest, show_dropped=args.all, today=today, out=out, noun="matched")
+    render_digest(plan.digest, show_dropped=args.all, today=today, out=out, noun="matched", codes=codes)
     _summary(plan, args, err, noun="matched")
     print(f"{len(jobs)} postings replayed from {origin}", file=err)
     return 0
@@ -414,6 +483,194 @@ def cmd_discover(args: argparse.Namespace, transport: httpx.BaseTransport | None
     return 1 if found and errors == len(found) else 0
 
 
+# --- the tracker ---------------------------------------------------------------
+
+def _open_store(path: Path, err: TextIO) -> Store | None:
+    try:
+        return Store.open(path)
+    except StoreError as exc:
+        _store_error(exc, err)
+        return None
+
+
+def _when(args: argparse.Namespace, now: datetime, err: TextIO) -> datetime | None:
+    if not getattr(args, "date", None):
+        return now
+    try:
+        return tracker.parse_day(args.date, now)
+    except TrackerError as exc:
+        print(f"--date: {exc}", file=err)
+        return None
+
+
+def _logged(app: tracker.Application) -> str:
+    extras = [f"resume {app.resume_version}"]
+    if app.cover_letter:
+        extras.append("cover letter")
+    if app.referral:
+        extras.append("referral")
+    return (f"Logged #{app.code} {app.company} — {app.title} "
+            f"(applied {tracker.local_day(app.applied_at)}; {', '.join(extras)})")
+
+
+def cmd_apply(args: argparse.Namespace, out: TextIO, err: TextIO, now: datetime) -> int:
+    if args.codes and args.url:
+        print("give codes or --url, not both", file=err)
+        return 2
+    if not args.codes and not args.url:
+        print("which application? Give its digest code (`jobfeed apply 412`), or --url for a role without one",
+              file=err)
+        return 2
+    if args.codes and (args.company or args.title or args.via):
+        print("--company, --title and --via are for --url; a code already says which posting it is", file=err)
+        return 2
+    config = _load_config(args.config, err)
+    if config is None:
+        return 2
+    when = _when(args, now, err)
+    if when is None:
+        return 2
+    resume = (args.resume or config.tracking.resume_version).strip()
+    cover = config.tracking.cover_letter if args.cover_letter is None else args.cover_letter
+    store = _open_store(args.db, err)
+    if store is None:
+        return 2
+    failed = 0
+    with store:
+        if args.url:
+            opts = tracker.LogOptions(applied_at=when, resume_version=resume, cover_letter=cover,
+                                      referral=args.referral, note=args.note, logged_via="manual")
+            try:
+                row = store.by_url(args.url)
+                if row is not None:
+                    if args.company or args.title or args.via:
+                        print("(that link is a posting jobfeed saved, so --company/--title/--via are ignored)",
+                              file=err)
+                    app = tracker.log_posting(store, row, opts)
+                else:
+                    via = args.via or ("referral" if args.referral else "other")
+                    app = tracker.log_manual(store, url=args.url, company=args.company, title=args.title,
+                                             via=via, opts=opts)
+            except TrackerError as exc:
+                print(f"not logged: {exc}", file=err)
+                return 1
+            print(_logged(app), file=out)
+            if app.job_id is None:
+                print(f"  its code is #{app.code}; use it with `jobfeed mark` and `jobfeed note`", file=out)
+            return 0
+        for code in dict.fromkeys(args.codes):   # once each, in the order given
+            opts = tracker.LogOptions(applied_at=when, resume_version=resume, cover_letter=cover,
+                                      referral=args.referral, note=args.note)
+            try:
+                row = store.by_code(code)
+                if row is None:
+                    existing = tracker.get_application(store, code)
+                    if existing is None:
+                        raise TrackerError(f"no posting #{code} in {args.db}; codes come from the digest "
+                                           "(log other roles with --url)")
+                    raise TrackerError(f"#{code} is already logged ({existing.company}, applied "
+                                       f"{tracker.local_day(existing.applied_at)})")
+                app = tracker.log_posting(store, row, opts)
+            except TrackerError as exc:
+                print(f"#{code} not logged: {exc}", file=err)
+                failed += 1
+                continue
+            print(_logged(app), file=out)
+    return 1 if failed else 0
+
+
+def cmd_mark(args: argparse.Namespace, out: TextIO, err: TextIO, now: datetime) -> int:
+    kind = tracker.ALIASES.get(args.stage.strip().lower().replace(" ", "-"))
+    if kind is None:
+        print(f"'{args.stage}' isn't a stage; `jobfeed mark --help` lists them", file=err)
+        return 2
+    when = _when(args, now, err)
+    if when is None:
+        return 2
+    store = _open_store(args.db, err)
+    if store is None:
+        return 2
+    with store:
+        try:
+            current = tracker.get_application(store, args.code)
+            before = current.stage if current else None
+            app = tracker.mark(store, args.code, kind, when, note=args.note)
+        except TrackerError as exc:
+            print(f"not recorded: {exc}", file=err)
+            return 1
+    day, stage = tracker.local_day(when), tracker.stage_label(app.stage)
+    if kind == "reply":
+        what = f"reply on {day}" + (f", back at {stage}" if before == "no_response" else f" (still {stage})")
+    elif kind == "reopened":
+        what = f"reopened on {day}, back at {stage}"
+    elif kind in tracker.STAGE_EVENTS:
+        what = f"moved to {stage} on {day}"
+    else:
+        what = f"{stage} on {day}"
+    print(f"#{app.code} {app.company} — {app.title}: {what}", file=out)
+    return 0
+
+
+def cmd_note(args: argparse.Namespace, out: TextIO, err: TextIO, now: datetime) -> int:
+    store = _open_store(args.db, err)
+    if store is None:
+        return 2
+    with store:
+        try:
+            app = tracker.add_note(store, args.code, " ".join(args.text), now)
+        except TrackerError as exc:
+            print(f"not added: {exc}", file=err)
+            return 1
+    print(f"Noted on #{app.code} {app.company} — {app.title}", file=out)
+    return 0
+
+
+def cmd_apps(args: argparse.Namespace, out: TextIO, err: TextIO, now: datetime) -> int:
+    store = _open_store(args.db, err)
+    if store is None:
+        return 2
+    with store:
+        if args.code is not None:
+            app = tracker.get_application(store, args.code, with_events=True)
+            if app is None:
+                print(f"no application #{args.code}; `jobfeed apps --all` lists them", file=err)
+                return 1
+            source = SOURCE_NAMES.get(app.found_via, app.found_via)
+            section = SECTION_TITLES.get(app.digest_section) if app.digest_section else None
+            print("\n".join(tracker.detail_lines(app, source, section)), file=out)
+            return 0
+        shown = tracker.list_applications(store, include_closed=args.all)
+        total = len(tracker.list_applications(store, include_closed=True))
+    if not total:
+        print("No applications yet. Log one with `jobfeed apply CODE` (the number before a posting in the digest).",
+              file=out)
+        return 0
+    label = "Applications" if args.all else "Open applications"
+    print(f"{label} ({len(shown)})", file=out)
+    if shown:
+        print(f"  {'code':<6} {'stage':<12} {'applied':<7} {'age':>4}  role", file=out)
+        for app in shown:
+            print(tracker.list_line(app, now), file=out)
+    closed = total - len(shown)
+    if closed and not args.all:
+        print(f"  … and {closed} closed (add --all)", file=out)
+    return 0
+
+
+def cmd_undo(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    store = _open_store(args.db, err)
+    if store is None:
+        return 2
+    with store:
+        try:
+            result = tracker.undo(store, args.code)
+        except TrackerError as exc:
+            print(f"nothing undone: {exc}", file=err)
+            return 1
+    print(result[0].upper() + result[1:], file=out)
+    return 0
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -435,6 +692,16 @@ def main(
         return cmd_replay(args, out, err, today, now)
     if args.command == "send-test":
         return cmd_send_test(args, err, mailer, now)
+    if args.command == "apply":
+        return cmd_apply(args, out, err, now)
+    if args.command == "mark":
+        return cmd_mark(args, out, err, now)
+    if args.command == "note":
+        return cmd_note(args, out, err, now)
+    if args.command == "apps":
+        return cmd_apps(args, out, err, now)
+    if args.command == "undo":
+        return cmd_undo(args, out, err)
     return cmd_discover(args, transport, out, err)
 
 

@@ -26,7 +26,7 @@ def test_creates_schema_with_version(db):
     conn = sqlite3.connect(db)
     assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     cols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)")]
-    assert cols == ["id", "dedupe_key", "first_seen", "last_seen", "matched", "emailed_at", "data"]
+    assert cols == ["id", "dedupe_key", "first_seen", "last_seen", "matched", "emailed_at", "data", "code", "section"]
 
 
 def test_save_and_read_back(db):
