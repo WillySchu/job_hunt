@@ -91,6 +91,8 @@ All three ask, as a condition of using their APIs, for a link back to the postin
 
 When an aggregator and a company's own board carry the same role, the company board's copy is the one sent (see Run for real).
 
+**Applying.** Under an aggregator posting, the digest adds "Apply on the company's site" with a link to the company's own Greenhouse, Lever or Ashby posting whenever the aggregator gave one. Applying there is free and goes straight to the company. Remote OK charges to use its Apply button ($14.95 a month as of November 2026), so its postings with no company link get "find it on Company's own careers site" and a search link instead. The aggregator's page stays the main link, as their terms ask.
+
 **Harvesting.** When an aggregator posting for an engineering role links to the company's own Greenhouse, Lever or Ashby board, `run` adds the company to `companies.yaml`. New entries go under a "harvested from aggregator postings" header with `origin: harvested`, and their boards are polled from the next run. `--dry-run` only reports what it would add. A board already on your list under any name is skipped, as is a company already pointing at a different board. A company you listed without a board (`ats: null` or `unsupported`) gets the one found. Set `aggregators.harvest: false` to turn this off.
 
 ### Find each company's board

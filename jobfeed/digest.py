@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 from dataclasses import dataclass, field
 from datetime import date
+from urllib.parse import quote_plus
 
 from jobfeed.filters import SECTION_ORDER, SECTION_TITLES, WATCHLIST, Digest, Entry
 from jobfeed.models import Job
@@ -18,6 +19,27 @@ APPS_TITLE = "Your applications"
 
 # The "Your applications" block: (heading, lines) per part, from followups.blocks.
 AppBlock = list[tuple[str, list[str]]]
+
+# Aggregators whose Apply button asks you to pay (Remote OK, as of Nov 2026: a
+# $14.95/month plan). Their postings get a pointer to the company's own site.
+PAYWALLED_APPLY = {"remoteok"}
+
+
+def search_url(job: Job) -> str:
+    return "https://duckduckgo.com/?q=" + quote_plus(f"{job.company} careers {job.title}")
+
+
+def apply_note(job: Job) -> tuple[str, str] | None:
+    """(text, link) for applying on the company's own site, when the posting came from an aggregator.
+    The aggregator's page stays the posting's main link, as their terms ask."""
+    if job.source not in AGGREGATORS:
+        return None
+    if job.apply_url:
+        return "Apply on the company's site", job.apply_url
+    if job.source in PAYWALLED_APPLY:
+        name = SOURCE_NAMES.get(job.source, job.source)
+        return f"{name} charges to apply; find it on {job.company}'s own careers site", search_url(job)
+    return None
 
 
 # --- pieces of an entry --------------------------------------------------------------
@@ -181,6 +203,9 @@ def render_text(digest: Digest, today: date, *, health: Health | None = None, sh
             lines += [f"  {'#' + str(code) + ' ' if code else ''}{entry.job.title} — {' · '.join(headline_parts(entry.job))}",
                       f"      {' · '.join(detail_parts(entry))}",
                       f"      {entry.job.url}"]
+            note = apply_note(entry.job)
+            if note:
+                lines.append(f"      {note[0]}: {note[1]}")
         if hidden:
             lines.append(f"  … {hidden} more not shown{overflow_hint}")
     if show_dropped and digest.dropped:
@@ -218,10 +243,20 @@ def _entry_html(entry: Entry, code: int | None = None) -> str:
             f'{_e(job.title)}</a>') if job.url else f'<strong>{_e(job.title)}</strong>'
     tag = (f'<span style="color:{_QUIET};font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">'
            f'#{code}</span> ') if code else ""
+    extra = ""
+    note = apply_note(job)
+    if note:
+        text, href = note
+        if job.apply_url:
+            body = f'<a href="{_e(href)}" style="color:{_ACCENT};text-decoration:none">{_e(text)} →</a>'
+        else:
+            body = (f'{_e(text)}: <a href="{_e(href)}" style="color:{_ACCENT};text-decoration:none">'
+                    'search for it →</a>')
+        extra = f'<div style="font-size:13px;line-height:1.4;color:{_QUIET};margin-top:2px">{body}</div>'
     return (f'<tr><td style="padding:10px 0;border-bottom:1px solid {_RULE};{_FONT}">'
             f'<div style="font-size:15px;line-height:1.4;color:{_INK}">{tag}{link} — {head}</div>'
             f'<div style="font-size:13px;line-height:1.4;color:{_QUIET};margin-top:2px">{detail}</div>'
-            "</td></tr>")
+            f"{extra}</td></tr>")
 
 
 def _apps_html(apps: AppBlock) -> list[str]:

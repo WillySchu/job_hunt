@@ -258,3 +258,40 @@ def test_no_aggregators_flag(files):
     argv, _ = files
     code, _, err = _run(["run", "--dry-run", "--no-aggregators", *argv], aggregator_transport())
     assert code == 2 and "No boards to poll" in err
+
+
+# --- applying on the company's own site ------------------------------------------------
+
+def test_digest_points_to_the_company_site_for_aggregator_postings(files, tmp_path):
+    argv, _ = files
+    preview = tmp_path / "digest.html"
+    _, out, _ = _run(["run", "--no-email", "--html", str(preview), *argv], aggregator_transport())
+    lines = out.splitlines()
+
+    def after(url):
+        i = lines.index(f"      {url}") + 1
+        return lines[i] if i < len(lines) else ""
+
+    # a company board link is shown under the aggregator's own link, which stays the main one
+    assert after("https://remoteok.com/remote-jobs/remote-staff-infrastructure-engineer-orbit-1137465") == (
+        "      Apply on the company's site: https://jobs.ashbyhq.com/orbit/5c0ffee0-0000/application")
+    # Remote OK charges to apply: with no company link, point to a search for the company's own posting
+    assert after("https://remoteok.com/remote-jobs/remote-backend-engineer-quill-1137466") == (
+        "      Remote OK charges to apply; find it on Quill's own careers site: "
+        "https://duckduckgo.com/?q=Quill+careers+Backend+Engineer")
+    # other aggregators without a company link get no note
+    himalayas = "https://himalayas.app/companies/anywhere/jobs/backend-engineer?utm_source=api"
+    assert not after(himalayas).startswith("      Apply") and "charges" not in after(himalayas)
+
+    html = preview.read_text()
+    assert 'href="https://jobs.ashbyhq.com/orbit/5c0ffee0-0000/application"' in html
+    assert "Apply on the company&#x27;s site →</a>" in html
+    assert "find it on Quill&#x27;s own careers site: <a href=\"https://duckduckgo.com/?q=Quill+careers+Backend+Engineer\"" in html
+
+
+def test_company_board_postings_get_no_note(greenhouse_jobs):
+    from jobfeed.digest import apply_note
+    from jobfeed.models import Job
+    job = Job(id="greenhouse:1", source="greenhouse", company="Acme", title="SRE", url="u",
+              apply_url="https://jobs.lever.co/acme/1")
+    assert apply_note(job) is None
