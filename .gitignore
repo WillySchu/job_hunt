@@ -11,3 +11,4 @@ dist/
 .env
 jobs.db
 logs/
+companies.yaml.bak

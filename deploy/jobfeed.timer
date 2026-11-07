@@ -1,0 +1,14 @@
+# Starts jobfeed.service at 6:00 every morning, Seattle time, regardless of
+# the Pi's own time zone. Installed by deploy/install.sh.
+
+[Unit]
+Description=Run jobfeed every morning at 6:00 Pacific
+
+[Timer]
+OnCalendar=*-*-* 06:00:00 America/Los_Angeles
+# If the Pi was off or asleep at 6:00, run as soon as it's back.
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

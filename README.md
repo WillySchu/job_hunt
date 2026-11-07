@@ -1,6 +1,6 @@
 # jobfeed
 
-A daily email digest of new software engineering postings that are remote or in the Seattle area, built to run from cron on a Raspberry Pi. The full design is in [JOB_FEED_SPEC.md](JOB_FEED_SPEC.md).
+A daily email digest of new software engineering postings that are remote or in the Seattle area, built to run every morning on a Raspberry Pi as a systemd timer. The full design is in [JOB_FEED_SPEC.md](JOB_FEED_SPEC.md).
 
 ## Status
 
@@ -12,8 +12,8 @@ A daily email digest of new software engineering postings that are remote or in 
 | 4. Store and dedupe | **Done** — `jobs.db`, sent tracking, 30-day cross-source dedupe |
 | 5. Lever, Ashby and discover | **Done** — two more adapters; `discover` fills in `companies.yaml` |
 | 6. Aggregators | **Done** — Remotive, Remote OK and Himalayas; harvesting company boards from their links |
-| 7. Email | **Built** — HTML and text digest through Gmail, run-health footer, `send-test` |
-| 8. Deploy | Not started |
+| 7. Email | **Done** — HTML and text digest through Gmail, run-health footer, `send-test` |
+| 8. Deploy | **Built** — systemd service and 6:00 timer, `deploy/install.sh`; then a week of tuning |
 
 ## Setup
 
@@ -185,6 +185,46 @@ jq -r '[.location_raw, .work_mode, (.remote_region // "-"), (.cities | join("; "
 
 A wrong reading is worth a new case in `tests/test_normalize_location.py` or `tests/test_normalize_salary.py`.
 
+## Deploy on the Pi
+
+jobfeed runs as a systemd service, started every morning at 6:00 Seattle time by a timer. It needs Python 3.11 or newer, which Raspberry Pi OS Bookworm has.
+
+```sh
+git clone https://github.com/WillySchu/job_hunt.git ~/job_hunt && cd ~/job_hunt
+cp .env.example .env && chmod 600 .env    # fill in the three Gmail values
+deploy/install.sh
+```
+
+Run `install.sh` from your normal account, not with sudo; the service runs as that user, and the script asks for sudo only to install the units. It:
+
+1. builds `.venv` and installs jobfeed into it;
+2. checks `.env` and `config.yaml` without sending anything, and makes `.env` private if it isn't;
+3. installs `jobfeed.service` and `jobfeed.timer` into `/etc/systemd/system`, filling in your user and the repo path, and has systemd check them;
+4. enables the timer and shows the next run.
+
+Nothing is sent until 6:00. To see a run straight away:
+
+```sh
+sudo systemctl start jobfeed            # waits until the run finishes
+journalctl -u jobfeed -n 50 --no-pager  # what it printed: counts, failures, the send
+```
+
+`deploy/install.sh --print` shows the unit files without installing them. `deploy/install.sh --uninstall` removes them and keeps the repo, `.env` and `jobs.db`.
+
+How the timer and service behave:
+
+- **6:00 Pacific, whatever the Pi's clock zone.** The timer names the zone, so daylight saving is handled, and the digest's dates are Seattle dates.
+- **Missed mornings catch up.** If the Pi is off at 6:00, the run starts when it next boots.
+- **Failures retry.** If every board fails or Gmail can't be reached, often the network right after boot, the service tries again 10 minutes later, up to 4 starts in an hour. A settings error (exit 2) isn't retried. A failed send marks nothing as sent, so nothing is lost.
+- **Locked down.** The service runs at low priority, with the system and your home directory read-only except for the repo, where `jobs.db` and `companies.yaml` are written.
+
+**Updating.** After a `git pull`, run `deploy/install.sh` again. Harvesting edits `companies.yaml` on the Pi, so commit it there now and then (or `git stash` before pulling) to keep pulls clean.
+
+**If a morning email doesn't come:**
+
+- `journalctl -u jobfeed -n 100` shows what happened. Add `sudo` if it shows nothing.
+- `systemctl status jobfeed` shows the last exit status. Exit 2 means a settings problem; run `.venv/bin/jobfeed send-test` and `.venv/bin/jobfeed run --dry-run` by hand to see it.
+- "Start request repeated too quickly" means the retry limit was reached. `sudo systemctl reset-failed jobfeed` clears it.
 
 ## Layout
 
@@ -217,6 +257,10 @@ jobfeed/
     aggregators.py  # Remotive, Remote OK, Himalayas
     common.py       # shared parsing helpers
     __init__.py     # source registry; fetches 4 boards at a time
+deploy/
+  jobfeed.service   # systemd unit template (install.sh fills in user and path)
+  jobfeed.timer     # 6:00 Pacific daily, catches up after downtime
+  install.sh        # install, update or --uninstall
 tests/              # pytest, no network: httpx.MockTransport + fixtures
 config.yaml         # filter rules
 companies.yaml      # seed list and watchlist

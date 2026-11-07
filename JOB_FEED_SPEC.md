@@ -188,7 +188,7 @@ If a day has more than 50 matches, the email shows the top 50 and states how man
 
 ## Deployment on the Raspberry Pi
 
-The tool is a plain Python 3.11+ package in a virtualenv, run once a day by your existing cron, with three small dependencies: `httpx`, `pyyaml` and `beautifulsoup4`.
+The tool is a plain Python 3.11+ package in a virtualenv, run once a day by a systemd timer, with three small dependencies: `httpx`, `pyyaml` and `beautifulsoup4`.
 
 ```
 ~/jobfeed/
@@ -203,7 +203,7 @@ The tool is a plain Python 3.11+ package in a virtualenv, run once a day by your
   companies.yaml      # seed list and watchlist
   .env                # secrets, chmod 600, never committed
   jobs.db
-  logs/
+  deploy/             # systemd service, timer and install.sh
 ```
 
 **Secrets.** `.env` holds `GMAIL_USER`, `GMAIL_APP_PASSWORD` and `DIGEST_TO`. Mail goes through `smtp.gmail.com` on port 587 with STARTTLS.
@@ -215,11 +215,7 @@ The tool is a plain Python 3.11+ package in a virtualenv, run once a day by your
 - `jobfeed discover "Stripe" "Datadog"` — find each company's ATS and add it to `companies.yaml`
 - `jobfeed replay` — re-run the current filters over stored postings, to check a rule change
 
-**Cron.** Set the Pi's timezone to America/Los\_Angeles, then add:
-
-```
-17 7 * * * cd ~/jobfeed && .venv/bin/python -m jobfeed run >> logs/run.log 2>&1
-```
+**Schedule.** `deploy/install.sh` installs a one-shot `jobfeed.service` that runs as your user, and a `jobfeed.timer` that starts it at `06:00 America/Los_Angeles` daily. The zone is named in the timer, so the Pi's own zone doesn't matter. `Persistent=true` catches up a missed morning at boot. A run that exits 1 (every board failed or the email couldn't be sent) retries every 10 minutes, up to 4 starts an hour. Output goes to the journal: `journalctl -u jobfeed`.
 
 **Being a polite client.** Requests have a 20-second timeout, two retries with backoff, at most 4 at a time, and a User-Agent naming the tool. One failing source never stops the others; it shows up in the email footer instead.
 
@@ -233,8 +229,8 @@ Eight milestones, each ending in something you can run. Milestones 1–7 can be 
 - [x] **4. Store and dedupe.** `jobs.db`, `first_seen` and `emailed_at` tracking, and the 30-day cross-source dedupe.
 - [x] **5. Lever, Ashby and discover.** Two more adapters and the `discover` command, then discover run on the starter names in the Seed list section.
 - [x] **6. Aggregators.** Remotive, RemoteOK and Himalayas adapters, with their attribution links kept, plus slug harvesting from their apply links.
-- [ ] **7. Email.** HTML and text digest sent through Gmail; first real send to yourself.
-- [ ] **8. Deploy.** Install on the Pi, add the cron line, then read a week of digests and tune `config.yaml`.
+- [x] **7. Email.** HTML and text digest sent through Gmail; first real send to yourself.
+- [ ] **8. Deploy.** Install on the Pi with `deploy/install.sh` (systemd timer at 6:00), then read a week of digests and tune `config.yaml`.
 
 ## Risks and open questions
 

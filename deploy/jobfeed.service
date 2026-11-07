@@ -1,0 +1,59 @@
+# jobfeed: fetch, filter and email the daily job digest.
+#
+# A template: deploy/install.sh fills in your user, group and repo path and
+# installs the result as /etc/systemd/system/jobfeed.service. It runs when
+# jobfeed.timer fires; start it by hand with `sudo systemctl start jobfeed`.
+
+[Unit]
+Description=jobfeed daily job digest
+Documentation=file://@DIR@/README.md
+Wants=network-online.target
+After=network-online.target
+# Retries (below) stop after 4 starts within an hour.
+StartLimitIntervalSec=1h
+StartLimitBurst=4
+
+[Service]
+Type=oneshot
+User=@USER@
+Group=@GROUP@
+WorkingDirectory=@DIR@
+ExecStart=@DIR@/.venv/bin/jobfeed run
+# Dates in the digest follow Seattle time, whatever the Pi's own zone is.
+Environment=TZ=America/Los_Angeles
+Environment=PYTHONUNBUFFERED=1
+TimeoutStartSec=30min
+
+# Exit 1 means every board failed or Gmail couldn't be reached (often the
+# network right after boot). Nothing was marked sent, so try again in 10
+# minutes. Exit 2 is a settings problem that a retry won't fix.
+Restart=on-failure
+RestartSec=10min
+RestartPreventExitStatus=2
+
+# Be a quiet neighbour to the Pi's other jobs.
+Nice=10
+IOSchedulingClass=idle
+
+# Hardening: the system and home directories are read-only; only the repo,
+# where jobs.db and companies.yaml live, is writable. jobfeed needs nothing
+# but files in the repo and outbound network connections.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@DIR@
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+LockPersonality=yes
+SystemCallArchitectures=native
