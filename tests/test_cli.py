@@ -193,7 +193,7 @@ def test_replay_missing_file(tmp_path):
 
 def test_run_saves_and_second_run_sends_nothing_new(greenhouse_jobs, no_companies, tmp_path):
     db = tmp_path / "jobs.db"
-    argv = ["run", *no_companies, "--board", "greenhouse:examplecorp"]
+    argv = ["run", "--no-email", *no_companies, "--board", "greenhouse:examplecorp"]
     code, out, err = _run(argv, _transport(greenhouse_jobs))
     assert code == 0
     assert "2 new (0 watchlist)" in out
@@ -213,7 +213,7 @@ def test_dry_run_reads_the_db_but_never_writes(greenhouse_jobs, no_companies, tm
                      _transport(greenhouse_jobs))
     assert "2 new" in out and not db.exists()
 
-    _run(["run", *no_companies, "--board", "greenhouse:examplecorp"], _transport(greenhouse_jobs))
+    _run(["run", "--no-email", *no_companies, "--board", "greenhouse:examplecorp"], _transport(greenhouse_jobs))
     before = db.read_bytes()
     _, out, err = _run(["run", "--dry-run", *no_companies, "--board", "greenhouse:examplecorp"],
                        _transport(greenhouse_jobs), now=NOW + timedelta(days=1))
@@ -228,7 +228,7 @@ def test_json_never_writes(greenhouse_jobs, no_companies, tmp_path):
 
 
 def test_replay_reads_jobs_db_and_tags_sent_postings(greenhouse_jobs, no_companies, tmp_path):
-    _run(["run", *no_companies, "--board", "greenhouse:examplecorp"], _transport(greenhouse_jobs))
+    _run(["run", "--no-email", *no_companies, "--board", "greenhouse:examplecorp"], _transport(greenhouse_jobs))
     code, out, err = _run(["replay", "--all", *no_companies])
     assert code == 0
     assert out.startswith("Job feed replay · Fri Nov 6 · 2 matched (0 watchlist)")
@@ -238,12 +238,12 @@ def test_replay_reads_jobs_db_and_tags_sent_postings(greenhouse_jobs, no_compani
 
 
 def test_replay_days_limits_by_last_seen(greenhouse_jobs, no_companies):
-    _run(["run", *no_companies, "--board", "greenhouse:examplecorp"], _transport(greenhouse_jobs))
+    _run(["run", "--no-email", *no_companies, "--board", "greenhouse:examplecorp"], _transport(greenhouse_jobs))
     _, _, err = _run(["replay", *no_companies, "--days", "3"], now=NOW + timedelta(days=10))
     assert "0 postings replayed" in err
 
 
 def test_corrupt_db_is_reported(greenhouse_jobs, no_companies, tmp_path):
     (tmp_path / "jobs.db").write_text("garbage")
-    code, _, err = _run(["run", *no_companies, "--board", "greenhouse:examplecorp"], _transport(greenhouse_jobs))
+    code, _, err = _run(["run", "--no-email", *no_companies, "--board", "greenhouse:examplecorp"], _transport(greenhouse_jobs))
     assert code == 2 and "jobs.db error" in err

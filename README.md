@@ -11,8 +11,8 @@ A daily email digest of new software engineering postings that are remote or in 
 | 3. Filters | **Done** — rules from `config.yaml`, digest preview, `replay` |
 | 4. Store and dedupe | **Done** — `jobs.db`, sent tracking, 30-day cross-source dedupe |
 | 5. Lever, Ashby and discover | **Done** — two more adapters; `discover` fills in `companies.yaml` |
-| 6. Aggregators | **Built** — Remotive, Remote OK and Himalayas; harvesting company boards from their links |
-| 7. Email | Not started |
+| 6. Aggregators | **Done** — Remotive, Remote OK and Himalayas; harvesting company boards from their links |
+| 7. Email | **Built** — HTML and text digest through Gmail, run-health footer, `send-test` |
 | 8. Deploy | Not started |
 
 ## Setup
@@ -111,21 +111,42 @@ Unsupported companies mostly run their own career sites (often Workday). Those c
 
 Companies with `watch: true` go to the Watchlist section and are never dropped for a missing salary.
 
+### Set up email
+
+The digest goes out through your Gmail account, using an app password (Google Account → Security → 2-Step Verification → App passwords; 2-Step Verification has to be on).
+
+```sh
+cp .env.example .env
+chmod 600 .env          # it holds a password; jobfeed warns if others can read it
+# fill in GMAIL_USER, GMAIL_APP_PASSWORD (spaces are fine) and DIGEST_TO (comma-separate several)
+.venv/bin/jobfeed send-test
+```
+
+`send-test` sends a two-line message to `DIGEST_TO` and reports what Gmail said if it fails. A rejected login usually means a normal password was used instead of an app password. Settings in the environment override `.env`, and `--env PATH` reads another file.
+
 ### Run for real
 
 ```sh
-.venv/bin/jobfeed run --board greenhouse:stripe --board greenhouse:databricks
+.venv/bin/jobfeed run
 ```
 
-The same digest, plus three writes to `jobs.db`:
+This fetches every board, emails the digest, and records three things in `jobs.db`:
 
-- every fetched posting is saved, with when it was first and last seen and whether it passed the rules;
-- every posting shown in the digest is marked as sent;
-- a posting is only ever sent once. A role sent in the last 30 days isn't sent again from another source or office: the same title at the same company counts as the same role, and when an aggregator and the company's own board both have it, the board's copy wins.
+- every fetched posting, with when it was first and last seen and whether it passed the rules;
+- which postings the email carried, marked as sent;
+- each board's posting count, so the footer can say when one suddenly drops to zero.
 
-So a second run the same day prints "Nothing new matched." Postings past `digest.max_per_section` aren't marked, and lead the next run instead.
+A posting is only ever sent once. A role sent in the last 30 days isn't sent again from another source or office: the same title at the same company counts as the same role, and when an aggregator and the company's own board both have it, the board's copy wins.
 
-**Until milestone 7 the "send" is the printout.** A posting printed by `run` counts as sent, so don't add `run` to cron yet unless you read its output. To start over, delete `jobs.db`.
+The email goes out every run, even when nothing is new, so a missing email means something broke. Its subject follows the spec (`Job feed · Fri Nov 6 · 14 new (2 watchlist)`). It has an HTML version and a plain-text one, and the footer reports run health: postings per source, what was skipped and why, failed boards, boards that went empty since the last run, and credit to the aggregators. Postings past `digest.max_per_section` aren't marked, and lead the next email.
+
+If Gmail can't be reached, `run` retries twice, then exits with status 1 and marks nothing as sent, so the next run carries those postings. The Gmail settings are checked before anything is fetched, so a typo in `.env` fails in seconds.
+
+- `--no-email` prints the digest instead; its postings still count as sent.
+- `--html FILE` also writes the email's HTML, to open in a browser. It works with `--dry-run` too.
+- `--dry-run` never sends and never writes. It needs no `.env`.
+
+To start over, delete `jobs.db`.
 
 The summary on stderr counts what was skipped and why:
 
@@ -173,6 +194,8 @@ jobfeed/
   config.py         # config.yaml loader and validation
   store.py          # jobs.db: postings, first/last seen, sent
   dedupe.py         # what a run sends: skip sent, one copy per role, 30-day window
+  digest.py         # subject, text and HTML bodies, run-health footer
+  mailer.py         # .env settings; Gmail SMTP with STARTTLS and retries
   discover.py       # find each company's ATS; edit companies.yaml in place
   harvest.py        # company boards found in aggregator postings
   filters.py        # role, location and salary rules; digest sections and sorting

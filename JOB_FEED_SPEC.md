@@ -182,7 +182,7 @@ Each posting is one entry:
 
 > **Senior Backend Engineer** — Acme · Remote (US) · $165K–$210K · Senior Tags: possibly full stack · via Greenhouse · View posting
 
-The footer reports run health: postings fetched per source, matches, and any source that errored or returned zero. A board that suddenly returns zero usually means the company changed ATS.
+The footer reports run health: postings fetched per source, matches, and any source that errored or returned zero. A board that suddenly returns zero usually means the company changed ATS. jobs.db keeps each board's posting count per run, so "returned zero" means zero after having postings last run; boards that are simply empty are counted, not listed. A failed send marks nothing as sent, so the next run resends.
 
 If a day has more than 50 matches, the email shows the top 50 and states how many were left out.
 
@@ -232,7 +232,7 @@ Eight milestones, each ending in something you can run. Milestones 1–7 can be 
 - [x] **3. Filters.** Rules read from `config.yaml`, plus the `replay` command.
 - [x] **4. Store and dedupe.** `jobs.db`, `first_seen` and `emailed_at` tracking, and the 30-day cross-source dedupe.
 - [x] **5. Lever, Ashby and discover.** Two more adapters and the `discover` command, then discover run on the starter names in the Seed list section.
-- [ ] **6. Aggregators.** Remotive, RemoteOK and Himalayas adapters, with their attribution links kept, plus slug harvesting from their apply links.
+- [x] **6. Aggregators.** Remotive, RemoteOK and Himalayas adapters, with their attribution links kept, plus slug harvesting from their apply links.
 - [ ] **7. Email.** HTML and text digest sent through Gmail; first real send to yourself.
 - [ ] **8. Deploy.** Install on the Pi, add the cron line, then read a week of digests and tune `config.yaml`.
 

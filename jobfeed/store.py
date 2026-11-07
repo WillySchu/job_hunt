@@ -12,7 +12,7 @@ from typing import Iterable
 from jobfeed.models import Job
 
 DEFAULT_PATH = Path("jobs.db")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: board_runs
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -25,6 +25,13 @@ CREATE TABLE IF NOT EXISTS jobs (
   data        TEXT NOT NULL      -- the Job as JSON
 );
 CREATE INDEX IF NOT EXISTS jobs_dedupe ON jobs(dedupe_key);
+CREATE TABLE IF NOT EXISTS board_runs (
+  label     TEXT NOT NULL,      -- "greenhouse:stripe"
+  run_at    TEXT NOT NULL,
+  postings  INTEGER NOT NULL,
+  error     TEXT,               -- NULL when the fetch worked
+  PRIMARY KEY (label, run_at)
+);
 """
 
 
@@ -139,6 +146,23 @@ class Store:
         return self._rows(f"SELECT {self._COLUMNS} FROM jobs WHERE last_seen >= ? ORDER BY first_seen, id",
                           (_ts(seen_since),))
 
+    def previous_counts(self, labels: Iterable[str]) -> dict[str, int]:
+        """Postings each board had on its most recent successful run."""
+        labels = list(set(labels))
+        found: dict[str, int] = {}
+        try:
+            for i in range(0, len(labels), 500):
+                chunk = labels[i: i + 500]
+                marks = ",".join("?" * len(chunk))
+                sql = f"""
+                    SELECT label, postings FROM board_runs AS b
+                    WHERE error IS NULL AND label IN ({marks}) AND run_at = (
+                      SELECT MAX(run_at) FROM board_runs WHERE label = b.label AND error IS NULL)"""
+                found.update(dict(self.conn.execute(sql, chunk)))
+        except sqlite3.OperationalError:
+            return {}  # a read-only copy of a schema-1 database has no board history yet
+        return found
+
     def count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
 
@@ -148,7 +172,8 @@ class Store:
         if self.readonly:
             raise StoreError("store was opened read-only")
 
-    def save_run(self, jobs: list[tuple[Job, str, bool]], sent_ids: Iterable[str], now: datetime) -> None:
+    def save_run(self, jobs: list[tuple[Job, str, bool]], sent_ids: Iterable[str], now: datetime,
+                 boards: Iterable[tuple[str, int, str | None]] = ()) -> None:
         """Upsert this run's postings and mark the sent ones, in one transaction.
 
         jobs: (job, dedupe_key, matched). New rows get first_seen = now; known rows
@@ -173,4 +198,8 @@ class Store:
             self.conn.executemany(
                 "UPDATE jobs SET emailed_at = ? WHERE id = ? AND emailed_at IS NULL",
                 [(stamp, id_) for id_ in sent_ids],
+            )
+            self.conn.executemany(
+                "INSERT OR REPLACE INTO board_runs (label, run_at, postings, error) VALUES (?, ?, ?, ?)",
+                [(label, stamp, postings, error) for label, postings, error in boards],
             )

@@ -1,4 +1,4 @@
-"""Command-line entry point: `jobfeed run`, `jobfeed replay`, `jobfeed discover`."""
+"""Command-line entry point: `jobfeed run`, `replay`, `discover` and `send-test`."""
 
 from __future__ import annotations
 
@@ -17,18 +17,16 @@ from jobfeed.companies import load_companies
 from jobfeed.config import DEFAULT_PATH as CONFIG_PATH
 from jobfeed.config import Config, ConfigError, load_config
 from jobfeed.dedupe import Plan, plan_run
+from jobfeed.digest import Health, build_health, render_html, render_text, subject
 from jobfeed.discover import HARVEST_HEADER, Discovery, EditError, discover_all, update_companies_file
 from jobfeed.harvest import harvest
-from jobfeed.filters import SECTION_ORDER, SECTION_TITLES, WATCHLIST, Digest, Entry
+from jobfeed.filters import Digest
 from jobfeed.http import make_client
 from jobfeed.models import Job
-from jobfeed.normalize import format_salary
-from jobfeed.sources import SOURCE_NAMES, SOURCES, Board, FetchResult, fetch_all
+from jobfeed.mailer import DEFAULT_ENV, GmailMailer, MailConfigError, Mailer, SendError, build_message, load_settings
+from jobfeed.sources import SOURCES, Board, FetchResult, fetch_all
 from jobfeed.store import DEFAULT_PATH as DB_PATH
 from jobfeed.store import Store, StoreError, utc_now
-
-MAX_LOCATION_CHARS = 70
-
 
 def _parse_board(spec: str) -> Board:
     source, sep, slug = spec.partition(":")
@@ -53,10 +51,13 @@ def build_parser() -> argparse.ArgumentParser:
                         help="postings per section (default: digest.max_per_section; 0 = all)")
     shared.add_argument("--db", type=Path, default=DB_PATH, help="path to jobs.db")
 
-    run = sub.add_parser("run", parents=[shared],
-                         help="fetch, filter, save to jobs.db and send the digest (printed until milestone 7)")
+    run = sub.add_parser("run", parents=[shared], help="fetch, filter, save to jobs.db and email the digest")
     run.add_argument("--dry-run", action="store_true",
-                     help="print the digest this run would send; read jobs.db but write nothing")
+                     help="print the digest this run would send; read jobs.db but write and send nothing")
+    run.add_argument("--no-email", action="store_true",
+                     help="print the digest instead of emailing it; its postings still count as sent")
+    run.add_argument("--html", type=Path, metavar="FILE", help="also write the email's HTML to FILE, to preview it")
+    run.add_argument("--env", type=Path, default=DEFAULT_ENV, help="file with the Gmail settings (default .env)")
     run.add_argument(
         "--board",
         action="append",
@@ -83,68 +84,16 @@ def build_parser() -> argparse.ArgumentParser:
     discover.add_argument("--retry", action="store_true",
                           help="also re-check companies already marked `ats: unsupported`")
     discover.add_argument("--dry-run", action="store_true", help="print what was found and change nothing")
+
+    test = sub.add_parser("send-test", help="email a short test message, to check the Gmail settings")
+    test.add_argument("--env", type=Path, default=DEFAULT_ENV, help="file with the Gmail settings (default .env)")
     return parser
 
 
 # --- rendering -------------------------------------------------------------
 
-def _pay(job: Job) -> str:
-    if job.salary_min is not None or job.salary_max is not None:
-        return format_salary(job.salary_min, job.salary_max)
-    if job.salary_raw:
-        return f"{job.salary_raw} ({job.salary_currency}, not compared)"
-    return "no salary listed"
-
-
-def _mode(job: Job) -> str:
-    if job.work_mode == "remote":
-        return f"remote ({job.remote_region or 'region unstated'})"
-    return job.work_mode
-
-
-def _location(job: Job) -> str:
-    loc = job.location_raw or "no location given"
-    return loc if len(loc) <= MAX_LOCATION_CHARS else loc[: MAX_LOCATION_CHARS - 1] + "…"
-
-
-def _entry_lines(entry: Entry) -> list[str]:
-    job = entry.job
-    head = f"{job.title} — {job.company} · {_location(job)} · {_pay(job)}"
-    if job.seniority:
-        head += f" · {job.seniority.title()}"
-    detail = [_mode(job)]
-    if job.remote_states:
-        detail.append("states: " + ", ".join(job.remote_states))
-    detail += entry.verdict.tags
-    detail.append(f"via {SOURCE_NAMES.get(job.source, job.source)}")
-    if job.posted_at:
-        detail.append(f"posted {job.posted_at.date().isoformat()}")
-    return [f"  {head}", f"      {' · '.join(detail)}", f"      {job.url}"]
-
-
 def render_digest(digest: Digest, *, show_dropped: bool, today: date, out: TextIO, noun: str = "new") -> None:
-    watch_count = len(digest.sections[WATCHLIST]) + digest.hidden.get(WATCHLIST, 0)
-    label = "Job feed" if noun == "new" else "Job feed replay"
-    print(f"{label} · {today.strftime('%a %b')} {today.day} · {digest.matched} {noun} ({watch_count} watchlist)",
-          file=out)
-    if not digest.matched:
-        print("\nNothing new matched." if noun == "new" else "\nNothing matched.", file=out)
-    for name in SECTION_ORDER:
-        entries = digest.sections[name]
-        hidden = digest.hidden.get(name, 0)
-        if not entries:
-            continue
-        print(f"\n== {SECTION_TITLES[name]} ({len(entries) + hidden})", file=out)
-        for entry in entries:
-            print("\n".join(_entry_lines(entry)), file=out)
-        if hidden:
-            print(f"  … {hidden} more not shown (raise digest.max_per_section or use --limit 0)", file=out)
-    if show_dropped and digest.dropped:
-        print(f"\n== Dropped ({len(digest.dropped)})", file=out)
-        for entry in sorted(digest.dropped, key=lambda e: (e.verdict.stage or "", e.job.company, e.job.title)):
-            job = entry.job
-            print(f"  {entry.verdict.stage:<8}  {job.title} — {job.company} · {_location(job)}", file=out)
-            print(f"            {entry.verdict.reason}", file=out)
+    print(render_text(digest, today, show_dropped=show_dropped, noun=noun), file=out)
 
 
 def _drop_summary(digest: Digest) -> str:
@@ -203,11 +152,26 @@ def _store_error(exc: StoreError, err: TextIO) -> int:
 
 
 def cmd_run(args: argparse.Namespace, transport: httpx.BaseTransport | None, out: TextIO, err: TextIO,
-            today: date, now: datetime) -> int:
+            today: date, now: datetime, mailer: Mailer | None = None) -> int:
     config = _load_config(args.config, err)
     if config is None:
         return 2
     _apply_limit(config, args.limit)
+    write = not args.dry_run and not args.json
+    email = write and not args.no_email
+
+    # Check the Gmail settings before fetching anything, so a typo fails in seconds.
+    settings = None
+    if email:
+        try:
+            settings = load_settings(args.env)
+        except (MailConfigError, OSError) as exc:
+            print(f"email settings: {exc}.\nUse --no-email to print the digest instead, "
+                  "or --dry-run to preview it.", file=err)
+            return 2
+        if settings.warning:
+            print(f"warning: {settings.warning}", file=err)
+        mailer = mailer or GmailMailer(settings)
 
     if args.board:
         boards = args.board
@@ -232,27 +196,69 @@ def cmd_run(args: argparse.Namespace, transport: httpx.BaseTransport | None, out
         _print_fetch_summary(results, err)
         return status
 
-    write = not args.dry_run
     try:
         store = Store.open(args.db) if write else Store.open_readonly(args.db)
     except StoreError as exc:
         return _store_error(exc, err)
     try:
         plan = plan_run(jobs, config, watched=_watched(args.companies, boards), store=store, now=now)
-        render_digest(plan.digest, show_dropped=args.all, today=today, out=out)
+        previous = store.previous_counts(r.board.label for r in results) if store else {}
+        health = build_health(results, plan, previous)
+        if not email:
+            render_digest(plan.digest, show_dropped=args.all, today=today, out=out)
         _summary(plan, args, err)
         _print_fetch_summary(results, err)
+        for label, had in health.went_empty:
+            print(f"  NOW EMPTY {label}: had {had} postings last run", file=err)
+        if args.html:
+            args.html.write_text(render_html(plan.digest, today, health=health))
+            print(f"wrote the email's HTML to {args.html}", file=err)
+
+        sent = plan.to_send
+        if email:
+            assert mailer is not None and settings is not None
+            title = subject(plan.digest, today)
+            to = ", ".join(settings.to)
+            msg = build_message(settings, title,
+                                render_text(plan.digest, today, health=health, overflow_hint="; they lead the next digest"),
+                                render_html(plan.digest, today, health=health))
+            try:
+                mailer.send(msg)
+                print(f"emailed \"{title}\" to {to}", file=err)
+            except SendError as exc:
+                print(f"EMAIL FAILED: {exc}\nNothing was marked as sent; the next run will include these postings.",
+                      file=err)
+                sent, status = [], 1
         if write:
-            sent = plan.to_send
-            store.save_run([(j, plan.keys[j.id], plan.matched[j.id]) for j in jobs], sent, now)
-            print(f"saved {len(jobs)} postings to {args.db} · marked {len(sent)} as sent "
-                  "(email arrives in milestone 7; until then the digest above is the send)", file=err)
+            board_log = [(r.board.label, len(r.jobs), r.error) for r in results]
+            store.save_run([(j, plan.keys[j.id], plan.matched[j.id]) for j in jobs], sent, now, board_log)
+            print(f"saved {len(jobs)} postings to {args.db} · marked {len(sent)} as sent", file=err)
         if config.aggregators.harvest:
             _harvest(jobs, config, args, write=write, err=err)
     finally:
         if store:
             store.close()
     return status
+
+
+def cmd_send_test(args: argparse.Namespace, err: TextIO, mailer: Mailer | None, now: datetime) -> int:
+    try:
+        settings = load_settings(args.env)
+    except (MailConfigError, OSError) as exc:
+        print(f"email settings: {exc}", file=err)
+        return 2
+    if settings.warning:
+        print(f"warning: {settings.warning}", file=err)
+    msg = build_message(settings, "jobfeed test email",
+                        f"This is a test from jobfeed, sent {now.astimezone():%Y-%m-%d %H:%M %Z}.\n"
+                        "If you're reading it, the Gmail settings in .env work.")
+    try:
+        (mailer or GmailMailer(settings)).send(msg)
+    except SendError as exc:
+        print(f"EMAIL FAILED: {exc}", file=err)
+        return 1
+    print(f"sent a test email to {', '.join(settings.to)}", file=err)
+    return 0
 
 
 def aggregator_boards(config: Config) -> list[Board]:
@@ -415,16 +421,20 @@ def main(
     out: TextIO | None = None,
     err: TextIO | None = None,
     now: datetime | None = None,
+    mailer: Mailer | None = None,
 ) -> int:
+    """`mailer` replaces Gmail in tests; settings are still read from --env."""
     out = out or sys.stdout
     err = err or sys.stderr
     now = now or utc_now()
     today = now.astimezone().date()
     args = build_parser().parse_args(argv)
     if args.command == "run":
-        return cmd_run(args, transport, out, err, today, now)
+        return cmd_run(args, transport, out, err, today, now, mailer)
     if args.command == "replay":
         return cmd_replay(args, out, err, today, now)
+    if args.command == "send-test":
+        return cmd_send_test(args, err, mailer, now)
     return cmd_discover(args, transport, out, err)
 
 

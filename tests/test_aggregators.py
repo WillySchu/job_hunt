@@ -219,7 +219,7 @@ def files(tmp_path):
 
 def test_run_polls_aggregators_credits_them_and_harvests(files):
     argv, companies = files
-    code, out, err = _run(["run", *argv], aggregator_transport())
+    code, out, err = _run(["run", "--no-email", *argv], aggregator_transport())
     assert code == 0
     assert "Senior Backend Engineer — Acme Payments" in out
     assert "via Remotive" in out and "via Remote OK" in out and "via Himalayas" in out
@@ -250,7 +250,7 @@ def test_harvest_can_be_turned_off(files, tmp_path):
     cfg = tmp_path / "config.yaml"
     cfg.write_text("aggregators:\n  harvest: false\n")
     before = companies.read_text()
-    _, _, err = _run(["run", *argv, "--config", str(cfg)], aggregator_transport())
+    _, _, err = _run(["run", "--no-email", *argv, "--config", str(cfg)], aggregator_transport())
     assert "added" not in err and companies.read_text() == before
 
 
