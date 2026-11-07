@@ -76,7 +76,9 @@ def load_settings(path: Path = DEFAULT_ENV, environ: Mapping[str, str] | None = 
                         to=to, warning=warning)
 
 
-def build_message(settings: MailSettings, subject: str, text: str, html: str | None = None) -> EmailMessage:
+def build_message(settings: MailSettings, subject: str, text: str, html: str | None = None,
+                  attachments: list[tuple[str, bytes, str, str]] = ()) -> EmailMessage:
+    """attachments: (filename, data, maintype, subtype)."""
     msg = EmailMessage()
     msg["From"] = f"jobfeed <{settings.user}>"
     msg["To"] = ", ".join(settings.to)
@@ -87,6 +89,8 @@ def build_message(settings: MailSettings, subject: str, text: str, html: str | N
     msg.set_content(text)
     if html:
         msg.add_alternative(html, subtype="html")
+    for filename, data, maintype, subtype in attachments:
+        msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=filename)
     return msg
 
 

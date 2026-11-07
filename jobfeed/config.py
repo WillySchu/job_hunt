@@ -90,6 +90,7 @@ class TrackingRules:
     weekly_report: bool = True     # email `jobfeed stats` as a weekly report, on weekly_day
     weekly_day: str = "monday"
     backups_kept: int = 8          # weekly copies of jobs.db kept in backups/; 0 turns backups off
+    attach_backup: bool = True     # attach a gzipped copy of jobs.db to the weekly report
 
 
 @dataclass

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import re
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
 
@@ -215,3 +216,91 @@ def test_last_week_news_words():
                        None, now, RULES)]
     lines = weekly.last_week(facts, now - timedelta(days=7), now)
     assert lines == ["Last week: 0 applications (2 so far) · news from companies: 2 replies, 1 screen, 1 rejection"]
+
+
+# --- the attached backup --------------------------------------------------------------------------
+
+def _weekly_message(mailer):
+    [msg] = [m for m in mailer.sent if m["Subject"].startswith("Job search weekly")]
+    return msg
+
+
+def test_the_report_carries_a_working_copy_of_jobs_db(pi, tmp_path):
+    import gzip
+    pi.run(SAT, CapturingMailer())
+    pi.main(["apply", "101", *pi.args], SAT)
+    mailer = CapturingMailer()
+    pi.run(MON, mailer)
+    msg = _weekly_message(mailer)
+    [part] = list(msg.iter_attachments())
+    assert (part.get_filename(), part.get_content_type()) == ("jobs-2026-11-09.db.gz", "application/gzip")
+    restored = tmp_path / "restored.db"
+    restored.write_bytes(gzip.decompress(part.get_content()))
+    with Store.open(restored) as store:
+        assert store.by_code(101) is not None
+        assert store.conn.execute("SELECT COUNT(*) FROM applications").fetchone() == (1,)
+    text = msg.get_body(("plain",)).get_content()
+    assert re.search(r"Backup attached: jobs-2026-11-09\.db\.gz \(\d+ KB; gunzip it to get jobs\.db\)\.$", text.rstrip())
+    assert "!!" not in text
+
+
+def _size_of_copy(pi):
+    with Store.open(pi.db) as store:
+        return weekly.pack_backup(store, MON, limit=10**9).size
+
+
+def test_a_copy_nearing_the_limit_warns_at_the_top(pi, monkeypatch):
+    pi.run(SAT, CapturingMailer())
+    monkeypatch.setattr(weekly, "ATTACH_LIMIT", int(_size_of_copy(pi) / 0.8))
+    mailer = CapturingMailer()
+    _, _, err = pi.run(MON, mailer)
+    msg = _weekly_message(mailer)
+    assert len(list(msg.iter_attachments())) == 1
+    lines = msg.get_body(("plain",)).get_content().splitlines()
+    assert lines[2].startswith("!! Backup attached (jobs-2026-11-09.db.gz,") and "nearing the" in lines[2]
+    assert "weekly report: Backup attached" in err
+
+
+def test_a_copy_too_big_to_attach_says_so_at_the_top(pi, monkeypatch):
+    pi.run(SAT, CapturingMailer())
+    monkeypatch.setattr(weekly, "ATTACH_LIMIT", 100)
+    mailer = CapturingMailer()
+    code, _, err = pi.run(MON, mailer)
+    assert code == 0
+    msg = _weekly_message(mailer)
+    assert list(msg.iter_attachments()) == []
+    lines = msg.get_body(("plain",)).get_content().splitlines()
+    assert lines[2].startswith("!! BACKUP NOT ATTACHED: the compressed copy of jobs.db is ")
+    assert "copy them off another way (README → Backups)" in lines[2]
+    html = msg.get_body(("html",)).get_content()
+    assert "background:#fff8c5" in html and "BACKUP NOT ATTACHED" in html
+    assert "weekly report: BACKUP NOT ATTACHED" in err
+
+
+def test_a_failed_copy_still_sends_the_report_with_an_alert(pi, monkeypatch):
+    pi.run(SAT, CapturingMailer())
+
+    def broken(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(weekly, "pack_backup", broken)
+    mailer = CapturingMailer()
+    pi.run(MON, mailer)
+    text = _weekly_message(mailer).get_body(("plain",)).get_content()
+    assert "!! BACKUP NOT ATTACHED: copying jobs.db failed (disk full)." in text
+
+
+def test_attaching_can_be_turned_off(pi):
+    pi.cfg.write_text("tracking:\n  read_mail: false\n  attach_backup: false\n")
+    pi.run(SAT, CapturingMailer())
+    mailer = CapturingMailer()
+    pi.run(MON, mailer)
+    msg = _weekly_message(mailer)
+    assert list(msg.iter_attachments()) == [] and "Backup" not in msg.get_body(("plain",)).get_content()
+
+
+def test_weekly_command_attaches_too(pi):
+    pi.run(SAT, CapturingMailer())
+    mailer = CapturingMailer()
+    pi.main(["weekly", "--env", str(pi.env), "--config", str(pi.cfg), *pi.args], SAT, mailer)
+    assert [p.get_filename() for p in mailer.sent[0].iter_attachments()] == ["jobs-2026-11-07.db.gz"]

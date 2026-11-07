@@ -361,7 +361,9 @@ The run on Monday (`tracking.weekly_day`) also emails the report above as a sepa
 
 `jobs.db` now holds application history that can't be fetched again. Once a week, on the same run, jobfeed copies it to `backups/jobs-YYYY-MM-DD.db` beside it, keeping the newest 8 (`tracking.backups_kept`; 0 turns this off). The first copy is made by the first run after you install this, and the digest's footer says when one was made. The copy is taken with SQLite's own backup, so it's consistent even if something is writing at the time. `jobfeed backup` makes one now.
 
-A copy on the same SD card doesn't survive the card failing, so copy `backups/` off the Pi now and then, for example from your laptop:
+The weekly report email also carries a gzipped copy of `jobs.db` (`jobs-YYYY-MM-DD.db.gz`), so every week a copy lands in Gmail, off the Pi; `gunzip` it to get `jobs.db` back. Gmail takes 25 MB a message, so a compressed copy over 18 MB isn't attached, and the report says so at the top in a highlighted box. From 75% of that, the report warns that the day is coming. Every fetched posting is kept, so the file grows with time: roughly, 10,000 stored postings come close to the limit. `tracking.attach_backup: false` turns attaching off.
+
+A copy on the same SD card doesn't survive the card failing, so if attaching ever stops, copy `backups/` off the Pi another way, for example from your laptop:
 
 ```sh
 scp 'pi@raspberrypi.local:job_hunt/backups/*.db' ~/jobfeed-backups/

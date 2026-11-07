@@ -110,3 +110,7 @@ tracking:
   weekly_report: true
   weekly_day: monday
   backups_kept: 8
+  # The weekly report also carries a gzipped copy of jobs.db, so a copy lives in
+  # Gmail, off the Pi. If it ever grows too big to attach, the report says so at
+  # the top (and warns beforehand).
+  attach_backup: true

@@ -258,12 +258,22 @@ def _backup(store: Store, db: Path, now: datetime, keep: int) -> str:
 def _send_weekly(store: Store, day: date, config: Config, now: datetime, mailer: Mailer | None, settings,
                  out: TextIO, err: TextIO, *, record: bool = True) -> bool:
     """Email the weekly report (or print it, with no mailer). Never raises; False if it couldn't be sent."""
-    report = weekly.render(stats.gather(store, now, config.tracking), config.tracking, now, day)
+    packed, line, alert = None, None, False
+    if config.tracking.attach_backup and mailer is not None:
+        try:
+            packed = weekly.pack_backup(store, now)
+            line, alert = packed.line, packed.alert
+        except (OSError, sqlite3.Error) as exc:
+            line, alert = f"BACKUP NOT ATTACHED: copying jobs.db failed ({exc}).", True
+    report = weekly.render(stats.gather(store, now, config.tracking), config.tracking, now, day, line, alert)
+    if alert:
+        print(f"weekly report: {line}", file=err)
     if mailer is None:
         print("\n" + report.text, file=out)
     else:
+        attachments = [(packed.name, packed.data, "application", "gzip")] if packed and packed.data else []
         try:
-            mailer.send(build_message(settings, report.subject, report.text, report.html))
+            mailer.send(build_message(settings, report.subject, report.text, report.html, attachments))
         except SendError as exc:
             print(f"weekly report not sent: {exc}. The next run tries again.", file=err)
             return False

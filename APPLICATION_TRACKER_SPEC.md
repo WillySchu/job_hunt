@@ -227,7 +227,7 @@ CREATE TABLE mail_seen (
 
 Pay, work mode and seniority aren't copied: stats read them from `jobs` through `job_id`, so manually logged roles simply have none.
 
-**Backups.** Until now `jobs.db` held postings that could be fetched again; application history can't be. The Monday run copies the database to `backups/jobs-YYYY-MM-DD.db` and keeps the last 8 (`tracking.backups_kept`). The copy uses SQLite's backup API, so it's consistent even mid-write, and the first one is made by the first run after installing. `jobfeed backup` makes one on demand. Copying `backups/` off the Pi now and then guards against a failed SD card.
+**Backups.** Until now `jobs.db` held postings that could be fetched again; application history can't be. The Monday run copies the database to `backups/jobs-YYYY-MM-DD.db` and keeps the last 8 (`tracking.backups_kept`). The copy uses SQLite's backup API, so it's consistent even mid-write, and the first one is made by the first run after installing. `jobfeed backup` makes one on demand. The weekly report email carries a gzipped copy as an attachment, so a copy leaves the Pi every week; one over 18 MB compressed (Gmail's 25 MB per message, after encoding) isn't attached, and the report says so at the top, with a warning from 75% of that. Copying `backups/` off the Pi another way guards against a failed SD card once the copy no longer fits.
 
 ## Experiment plan
 
