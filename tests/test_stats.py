@@ -97,12 +97,14 @@ def test_verdicts(groups, says):
 def test_cut_groups():
     by = {c.key: c for c in CUTS}
     f = facts_for(_app(first_seen=NOW - timedelta(days=35), referral=True, cover_letter=True, resume_version=None,
-                       found_via="remoteok", digest_section="no_salary"), None, NOW, RULES)
-    assert {k: by[k].group(f) for k in ("via", "section", "referral", "resume", "cover", "autofilled", "fit",
-                                        "days", "seniority", "mode", "week")} == {
+                       found_via="remoteok", digest_section="no_salary", fit_score=70, fit_keywords=49),
+                  None, NOW, RULES)
+    assert {k: by[k].group(f) for k in ("via", "section", "referral", "resume", "cover", "autofilled", "fit_llm",
+                                        "fit_keywords", "days", "seniority", "mode", "week")} == {
         "via": "Remote OK", "section": "No salary listed", "referral": "yes", "resume": "unrecorded",
-        "cover": "yes", "autofilled": "unknown", "fit": "unscored", "days": "4–7 days", "seniority": "unknown",
-        "mode": "unknown", "week": "week of Oct 26"}
+        "cover": "yes", "autofilled": "unknown", "fit_llm": "70+", "fit_keywords": "under 50", "days": "4–7 days",
+        "seniority": "unknown", "mode": "unknown", "week": "week of Oct 26"}
+    assert by["fit_llm"].group(facts_for(_app(), None, NOW, RULES)) == "unscored"
 
 
 # --- jobfeed stats -------------------------------------------------------------------------------------
@@ -190,3 +192,42 @@ def test_nothing_counted_yet_shows_no_empty_splits_unless_asked(search):
     assert "Resume version" not in out and "Funnel" in out and "Longest without news" in out
     _, out, _ = _run(["stats", "--by", "resume", "--db", str(search)], early)
     assert "  → too few to tell: none is old enough to count yet" in out
+
+
+# --- fit scores on applications (fit scorer milestone 3) --------------------------------------------------
+
+def _scored(n, *, llm, kw, replied):
+    """n counted applications whose scores and replies follow the given functions of i."""
+    return [facts_for(_app(fit_score=llm(i), fit_keywords=kw(i),
+                           events=[("reply", 3, "cli", None)] if replied(i) else []), None, NOW, RULES)
+            for i in range(n)]
+
+
+def test_fit_comparison_tells_a_predictive_score_from_a_useless_one():
+    # the LLM's top half gets replies 40% of the time and its bottom half 10%; keywords split them evenly
+    facts = _scored(60, llm=lambda i: 90 - i, kw=lambda i: 40 + (i * 7) % 50,
+                    replied=lambda i: (i < 30 and i % 5 < 2) or (i >= 30 and i % 10 == 0))
+    lines = stats.fit_lines(facts, "replied")
+    assert lines[0] == "Which fit score predicts a reply? (counted applications, split at each score's median)"
+    assert lines[1:3] == ["  LLM top half          12/30 40% (27–55%)", "  LLM bottom half       3/30 10% (4–23%)"]
+    assert lines[5] == "  → LLM (median 60.5): its top half does better: 40% vs 10%"
+    assert lines[6].startswith("  → keywords (median ") and "too few to tell" in lines[6]
+    assert lines[7] == "  So far only the LLM score separates the applications that get a reply."
+
+
+def test_fit_comparison_with_few_applications_or_a_backwards_score():
+    few = _scored(20, llm=lambda i: 90 - i, kw=lambda i: 50, replied=lambda i: i < 5)
+    assert "too few to tell: 10 and 10 counted; 15 in each half are needed" in stats.fit_lines(few, "replied")[5]
+    backwards = _scored(60, llm=lambda i: i, kw=lambda i: 50, replied=lambda i: i < 30 and i % 5 < 2)
+    assert "its bottom half does better (40% vs 0%): this score points the wrong way" in \
+        stats.fit_lines(backwards, "replied")[5]
+    assert stats.fit_lines(_scored(10, llm=lambda i: None, kw=lambda i: None, replied=lambda i: True), "replied") == []
+
+
+def test_fit_section_appears_in_the_report_once_scores_count():
+    facts = _scored(30, llm=lambda i: 90 - i, kw=lambda i: 60, replied=lambda i: i < 10)
+    text = "\n".join(stats.report(facts, RULES, now=NOW))
+    assert "Fit score (LLM)" in text and "Fit score (keywords)" not in text      # keywords: one band only
+    assert "Which fit score predicts a reply?" in text
+    fresh = [facts_for(_app(days_ago=2, fit_score=80), None, NOW, RULES)]
+    assert "Which fit score" not in "\n".join(stats.report(fresh, RULES, now=NOW))   # nothing counted yet

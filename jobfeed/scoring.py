@@ -15,7 +15,7 @@ from pathlib import Path
 
 import httpx
 
-from jobfeed import fit, llm
+from jobfeed import fit, llm, tracker
 from jobfeed.config import Config
 from jobfeed.models import Job
 from jobfeed.store import Store
@@ -93,6 +93,8 @@ def run(store: Store, digest_jobs: list[Job], config: Config, now: datetime, cli
     if llm_todo and key:
         kwargs = {"sleep": sleep} if sleep else {}
         report.llm = llm.score_batch(store, llm_todo, resume, config, key, client, now, **kwargs)
+    with store.conn:
+        tracker.sync_fit_scores(store)     # applications logged before their posting was scored
     return report
 
 

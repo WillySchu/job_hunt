@@ -103,6 +103,9 @@ def facts_for(app: Application, job: Job | None, now: datetime, rules: TrackingR
 
 
 def gather(store: Store, now: datetime, rules: TrackingRules, *, since: datetime | None = None) -> list[Facts]:
+    if not store.readonly:
+        with store.conn:
+            tracker.sync_fit_scores(store)      # applications logged before their posting was scored
     apps = [tracker.get_application(store, a.code, with_events=True)
             for a in tracker.list_applications(store, include_closed=True)]
     apps = [a for a in apps if a is not None and (since is None or a.applied_at >= since)]
@@ -143,11 +146,13 @@ def _days_band(f: Facts) -> str:
     return "0–1 days" if d <= 1 else "2–3 days" if d <= 3 else "4–7 days" if d <= 7 else "8+ days"
 
 
-def _fit_band(f: Facts) -> str:
-    s = f.app.fit_score
-    if s is None:
+FIT_BANDS = ("70+", "50–69", "under 50", "unscored")
+
+
+def _band(score: float | None) -> str:
+    if score is None:
         return "unscored"
-    return "high" if s >= 0.7 else "medium" if s >= 0.4 else "low"
+    return "70+" if score >= 70 else "50–69" if score >= 50 else "under 50"
 
 
 def _week(f: Facts) -> str:
@@ -176,7 +181,8 @@ CUTS = [
     Cut("resume", "Resume version", lambda f: f.app.resume_version or "unrecorded"),
     Cut("cover", "Cover letter", lambda f: _yes(f.app.cover_letter), ("yes", "no")),
     Cut("autofilled", "Form filled automatically", lambda f: _yes(f.app.autofilled), ("yes", "no", "unknown")),
-    Cut("fit", "Fit score", _fit_band, ("high", "medium", "low", "unscored")),
+    Cut("fit_llm", "Fit score (LLM)", lambda f: _band(f.app.fit_score), FIT_BANDS),
+    Cut("fit_keywords", "Fit score (keywords)", lambda f: _band(f.app.fit_keywords), FIT_BANDS),
     Cut("days", "Days from posting to applying", _days_band, ("0–1 days", "2–3 days", "4–7 days", "8+ days", "unknown")),
     Cut("seniority", "Seniority", lambda f: (f.job.seniority or "unstated") if f.job else "unknown",
         ("junior", "mid", "senior", "staff", "principal", "unstated", "unknown")),
@@ -287,6 +293,62 @@ def quiet_lines(facts: list[Facts], now: datetime) -> list[str]:
     return ["Longest without news"] + [f"  {follow_up_line(x)}" for x in open_[:QUIET_LISTED]]
 
 
+SCORERS = (("llm", "LLM", lambda f: f.app.fit_score), ("keywords", "keywords", lambda f: f.app.fit_keywords))
+
+
+def halves(facts: list[Facts], score) -> tuple[float, list[Facts], list[Facts]] | None:
+    """Counted applications with this score, split at the median: (median, top half, bottom half)."""
+    scored = sorted((f for f in facts if f.counted and score(f) is not None),
+                    key=lambda f: (score(f), f.app.applied_at), reverse=True)
+    if len(scored) < 2:
+        return None
+    cut = len(scored) // 2
+    return statistics.median(score(f) for f in scored), scored[:cut], scored[cut:]
+
+
+OUTCOME_WORDS = {"replied": "a reply", "screen": "a screen", "interview": "an interview", "offer": "an offer"}
+
+
+def half_verdict(top: Rate, bottom: Rate) -> tuple[str, int]:
+    """(verdict, direction): 1 when the top half clearly does better, -1 the bottom half, 0 can't tell."""
+    if min(top.n, bottom.n) < MIN_GROUP:
+        return f"too few to tell: {top.n} and {bottom.n} counted; {MIN_GROUP} in each half are needed", 0
+    if top.p == bottom.p or bottom.range[0] <= top.p <= bottom.range[1] or top.range[0] <= bottom.p <= top.range[1]:
+        return (f"too few to tell: {pct(top.p)}% and {pct(bottom.p)}% are within each other's likely ranges", 0)
+    if top.p > bottom.p:
+        return f"its top half does better: {pct(top.p)}% vs {pct(bottom.p)}%", 1
+    return f"its bottom half does better ({pct(bottom.p)}% vs {pct(top.p)}%): this score points the wrong way", -1
+
+
+def fit_lines(facts: list[Facts], metric: str) -> list[str]:
+    """Does each score's top half get answered more than its bottom half? The spec's test of the scorers."""
+    found = []
+    for key, name, score in SCORERS:
+        h = halves(facts, score)
+        if h is not None:
+            median, top, bottom = h
+            found.append((name, median, summarize(top).rates[metric], summarize(bottom).rates[metric]))
+    if not found:
+        return []
+    lines = [f"Which fit score predicts {OUTCOME_WORDS[metric]}? (counted applications, split at each score's median)"]
+    width = max(len(f"{name} bottom half") for name, *_ in found)
+    for name, median, top, bottom in found:
+        lines.append(f"  {name + ' top half':<{width}}  {_rate_cell(top)}")
+        lines.append(f"  {name + ' bottom half':<{width}}  {_rate_cell(bottom)}")
+    clear = []
+    for name, median, top, bottom in found:
+        text, direction = half_verdict(top, bottom)
+        lines.append(f"  → {name} (median {median:g}): {text}")
+        if direction == 1:
+            clear.append((name, pct(top.p) - pct(bottom.p)))
+    if len(found) == 2 and len(clear) == 1:
+        lines.append(f"  So far only the {clear[0][0]} score separates the applications that get {OUTCOME_WORDS[metric]}.")
+    elif len(clear) == 2:
+        (a, ga), (b, gb) = sorted(clear, key=lambda c: -c[1])
+        lines.append(f"  Both scores separate them; the {a} score by {ga} points, the {b} score by {gb}.")
+    return lines
+
+
 def report(facts: list[Facts], rules: TrackingRules, *, cuts: list[str] | None = None, metric: str = "replied",
            now: datetime | None = None) -> list[str]:
     """The whole `jobfeed stats` output, which the weekly email carries too.
@@ -315,6 +377,10 @@ def report(facts: list[Facts], rules: TrackingRules, *, cuts: list[str] | None =
         if not shown:
             lines += ["", "No splits yet: every application so far has the same resume, source, and so on. "
                           "`--by resume` (or another cut) shows one anyway."]
+    if cuts is None and summary.counted:
+        compare = fit_lines(facts, metric)
+        if compare:
+            lines += [""] + compare
     if now is not None and cuts is None:
         quiet = quiet_lines(facts, now)
         if quiet:

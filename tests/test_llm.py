@@ -261,3 +261,33 @@ def test_spent_this_month(tmp_path):
             from jobfeed.fit import save_score
             save_score(store, f"j{day}", Score("llm", "v", 50, "r", {"cost_usd": c}), r, NOW + timedelta(days=day))
         assert llm.spent_this_month(store, NOW + timedelta(days=1)) == pytest.approx(0.75)
+
+
+# --- scores on applications (milestone 3) -------------------------------------------------------------
+
+def _app_scores(db, code):
+    conn = sqlite3.connect(db)
+    return conn.execute("SELECT fit_keywords, fit_score FROM applications WHERE code = ?", (code,)).fetchone()
+
+
+def test_applications_carry_both_scores(pi, no_sleep):
+    pi.run()
+    pi.main(["apply", "101", "--db", str(pi.db), "--config", str(pi.cfg)])
+    kw, llm_score = _app_scores(pi.db, 101)
+    assert llm_score == 82 and 0 < kw <= 100
+    conn = sqlite3.connect(pi.db)
+    assert kw == conn.execute("SELECT score FROM fit_scores WHERE job_id = 'greenhouse:4412983' "
+                              "AND scorer = 'keywords'").fetchone()[0]
+
+
+def test_an_application_logged_before_scoring_gets_its_scores_later(pi, no_sleep):
+    pi.cfg.write_text("tracking:\n  read_mail: false\nfit:\n  enabled: false\n")
+    pi.run()
+    pi.main(["apply", "102", "--db", str(pi.db), "--config", str(pi.cfg)])
+    assert _app_scores(pi.db, 102) == (None, None)
+    pi.cfg.write_text("tracking:\n  read_mail: false\n")
+    pi.main(["fit", "backfill", *pi.args])
+    kw, llm_score = _app_scores(pi.db, 102)
+    assert llm_score == 35 and kw is not None
+    _, out, _ = pi.main(["stats", "--by", "fit_llm", "--db", str(pi.db), "--config", str(pi.cfg)], 30)
+    assert "Fit score (LLM)" in out and "  under 50 " in out

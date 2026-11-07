@@ -71,6 +71,7 @@ class Application:
     stage: str
     stage_at: datetime
     notes: str | None
+    fit_keywords: float | None = None    # fit_score is the LLM's score; both copied from the posting's
     events: list[Event] = field(default_factory=list)
 
     @property
@@ -113,7 +114,8 @@ def local_day(moment: datetime) -> str:
 # --- reading -----------------------------------------------------------------------
 
 _APP_COLUMNS = ("code, job_id, company, title, url, found_via, digest_section, referral, resume_version, "
-                "cover_letter, autofilled, fit_score, first_seen, applied_at, logged_via, stage, stage_at, notes")
+                "cover_letter, autofilled, fit_score, first_seen, applied_at, logged_via, stage, stage_at, notes, "
+                "fit_keywords")
 
 
 def _dt(value: str | None) -> datetime | None:
@@ -122,13 +124,13 @@ def _dt(value: str | None) -> datetime | None:
 
 def _application(row: tuple) -> Application:
     (code, job_id, company, title, url, via, section, referral, resume, cover, autofilled, fit, first_seen,
-     applied_at, logged_via, stage, stage_at, notes) = row
+     applied_at, logged_via, stage, stage_at, notes, fit_keywords) = row
     return Application(
         code=code, job_id=job_id, company=company, title=title, url=url, found_via=via, digest_section=section,
         referral=bool(referral), resume_version=resume, cover_letter=bool(cover),
         autofilled=None if autofilled is None else bool(autofilled), fit_score=fit,
         first_seen=_dt(first_seen), applied_at=_dt(applied_at), logged_via=logged_via, stage=stage,
-        stage_at=_dt(stage_at), notes=notes,
+        stage_at=_dt(stage_at), notes=notes, fit_keywords=fit_keywords,
     )
 
 
@@ -217,11 +219,12 @@ class LogOptions:
 
 def _insert(store: Store, code: int, *, job_id: str | None, company: str, title: str, url: str | None,
             found_via: str, section: str | None, first_seen: datetime | None, opts: LogOptions) -> Application:
+    scores = posting_scores(store, job_id)
     store.conn.execute(
-        f"INSERT INTO applications ({_APP_COLUMNS}) VALUES ({','.join('?' * 18)})",
+        f"INSERT INTO applications ({_APP_COLUMNS}) VALUES ({','.join('?' * 19)})",
         (code, job_id, company, title, url, found_via, section, int(opts.referral), opts.resume_version,
-         int(opts.cover_letter), None, None, _ts(first_seen) if first_seen else None, _ts(opts.applied_at),
-         opts.logged_via, "applied", _ts(opts.applied_at), None),
+         int(opts.cover_letter), None, scores.get("llm"), _ts(first_seen) if first_seen else None,
+         _ts(opts.applied_at), opts.logged_via, "applied", _ts(opts.applied_at), None, scores.get("keywords")),
     )
     _add_event(store, code, "applied", opts.applied_at, opts.origin, message_id=opts.message_id)
     if opts.note:
@@ -230,6 +233,24 @@ def _insert(store: Store, code: int, *, job_id: str | None, company: str, title:
     app = get_application(store, code)
     assert app is not None
     return app
+
+
+def posting_scores(store: Store, job_id: str | None) -> dict[str, int]:
+    """The posting's fit scores, by scorer, as the application copies them."""
+    if job_id is None:
+        return {}
+    return dict(store.conn.execute("SELECT scorer, score FROM fit_scores WHERE job_id = ?", (job_id,)))
+
+
+def sync_fit_scores(store: Store) -> int:
+    """Fill in scores for applications logged before their posting was scored. Returns how many changed."""
+    changed = 0
+    for scorer, column in (("keywords", "fit_keywords"), ("llm", "fit_score")):
+        changed += store.conn.execute(
+            f"UPDATE applications SET {column} = (SELECT score FROM fit_scores f WHERE f.job_id = applications.job_id "
+            f"AND f.scorer = ?) WHERE {column} IS NULL AND job_id IS NOT NULL AND EXISTS (SELECT 1 FROM fit_scores f "
+            f"WHERE f.job_id = applications.job_id AND f.scorer = ?)", (scorer, scorer)).rowcount
+    return changed
 
 
 def _already(store: Store, code: int) -> None:

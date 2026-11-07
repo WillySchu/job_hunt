@@ -34,8 +34,9 @@ Fit scorer:
 | --- | --- |
 | 1. Resume and keyword scorer | **Done** — every digest posting gets a hidden keyword score; `jobfeed fit backfill`, `profile`, `status` |
 | 2. LLM scorer | **Done** — Claude Haiku 5.5 scores each posting too; `jobfeed fit check`; per-run cap and monthly budget |
-| 3. Scores on applications and in the stats | Next |
-| 4–5 | Ratings and agreement; visible scores after the baseline |
+| 3. Scores on applications and in the stats | **Done** — applications carry both scores; a split per scorer; which score predicts replies |
+| 4. Ratings and agreement | Next: `jobfeed fit rate` and `jobfeed fit compare` |
+| 5. Visible scores | After the baseline |
 
 ## Setup
 
@@ -355,7 +356,7 @@ Resume version
 - **Counted** applications are at least `tracking.no_response_days` (21) old, or closed, so new applications that haven't had time to hear back don't drag the rates down.
 - Each rate has a likely range (a 90% interval). At these numbers a bare percentage misleads; the range is what to read.
 - Each split compares its highest and lowest group, and says **too few to tell** when either has fewer than 15 counted, or when either rate falls inside the other's range. Only otherwise does it name a winner. The example above is the point: 21% against 81% looks decisive, but 14 applications can't say so yet.
-- The splits: found via, digest section, referral, resume version, cover letter, form filled automatically, fit score, days from posting to applying, seniority, work mode, and week applied. Fit score and form filling read "unscored" and "unknown" until those tools exist. Until something is old enough to count, the splits are left out (`--by` still shows one).
+- The splits: found via, digest section, referral, resume version, cover letter, form filled automatically, fit score (LLM) and fit score (keywords) in bands of 70+, 50–69 and under 50, days from posting to applying, seniority, work mode, and week applied. Form filling reads "unknown" until that exists. Until something is old enough to count, the splits are left out (`--by` still shows one).
 - After the rates come the **funnel**, every application so far stage by stage for all time and the last 4 weeks, and the open applications that have gone **longest without news**.
 
 #### The weekly report
@@ -415,6 +416,23 @@ With `ANTHROPIC_API_KEY` in `.env` (an API key from a Claude Console organizatio
 - **Failures:** overloads and server errors are retried; a posting that still can't be scored is left for the next run, and a rejected key pauses scoring with a note in the footer. Scoring never stops or delays the digest beyond the calls themselves (four at a time).
 - **What's sent:** each posting's text, and the resume without its contact line. Nothing about your applications.
 - `fit.context_note` adds a line or two the resume doesn't say. The instructions, model and resume are recorded with each score, so changing any of them starts a new version rather than mixing old and new scores.
+
+#### Scores on applications
+
+An application copies both of its posting's scores when it's logged, however it's logged; one logged before its posting was scored gets them as soon as it is. `jobfeed stats` (and the weekly report) then splits applications by each score's bands, and asks the question the scorers exist for:
+
+```
+Which fit score predicts a reply? (counted applications, split at each score's median)
+  LLM top half          12/30 40% (27–55%)
+  LLM bottom half       3/30 10% (4–23%)
+  keywords top half     6/30 20% (11–34%)
+  keywords bottom half  9/30 30% (18–45%)
+  → LLM (median 56): its top half does better: 40% vs 10%
+  → keywords (median 66): too few to tell: 20% and 30% are within each other's likely ranges
+  So far only the LLM score separates the applications that get a reply.
+```
+
+The same rules as every other comparison apply: at least 15 counted applications in each half, and rates outside each other's likely ranges. Expect "too few to tell" for the first couple of months. `--metric screen` asks the same of screens.
 
 None of these commands shows a real posting's score. Your skills come from the resume: the terms it names, basic where its entry says "basic" or "some" (some implied too: PostgreSQL gives SQL, Kubernetes gives Docker). `fit.strong`, `fit.basic` and `fit.extra_skills` override by term name, and `fit.extra_terms` adds terms to the ~70 built in. The digest footer says how many postings were scored; if the resume can't be had at all, that run scores nothing and says why, and `fit backfill` catches up.
 
