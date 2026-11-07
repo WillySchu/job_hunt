@@ -80,7 +80,7 @@ The cache is written once a run (about $0.0002). Backfilling a few hundred posti
 
 - **Guard rails:** at most `fit.llm_max_per_run` postings a run (300), and scoring stops for the month once `fit.llm_monthly_budget` is reached ($5, about ten times the estimate). Postings left unscored are picked up later.
 - **Key:** `ANTHROPIC_API_KEY` in `.env`, beside the Gmail password. The API is billed through the Claude Console, separately from a Claude subscription. Max, Ultra and Team plans include monthly API credits that cover this many times over once a Console organization is linked; Pro has none, so it would mean buying credits.
-- **Failures:** the official Python SDK retries rate limits and server errors; anything still failing leaves the posting for the next run. The digest footer says "Fit scores: 48 scored, 2 left for tomorrow ($0.012)."
+- **Failures:** rate limits, overloads and server errors are retried (jobfeed calls the API with the httpx client it already uses, so the Pi needs no SDK); anything still failing leaves the posting for the next run. The digest footer says "Fit scores: 48 postings scored by keywords; 46 by the LLM ($0.012; $0.31 this month), 2 left for later (hidden for now)."
 - **What leaves the Pi:** each posting's text and your resume without its contact line, to Anthropic's API. Nothing else from `jobs.db`, and nothing about your applications.
 
 ## Comparing the two
@@ -130,7 +130,7 @@ The weekly backup and its email attachment cover the new tables, since they're i
 Five milestones, built in order. The first two start scoring every posting, hidden, so the baseline is scored from now on; the LLM scorer also backfills every posting already sent, since their text is stored. The rest compare the scorers and, after the baseline, show the scores.
 
 - [x] **1. Resume and keyword scorer.** Fetch the resume, schema 6, the keyword scorer, scoring each run's digest postings, and `jobfeed fit backfill`. Done when every posting sent has a keyword score.
-- [ ] **2. LLM scorer.** The API key, Haiku 5.5 with structured outputs and a cached system prompt, four calls at a time, the per-run and monthly caps, retries, and the cost line in the footer. Done when every posting sent has both scores, including the backfill.
+- [x] **2. LLM scorer.** The API key, Haiku 5.5 with structured outputs and a cached system prompt, four calls at a time, the per-run and monthly caps, retries, and the cost line in the footer. Done when every posting sent has both scores, including the backfill.
 - [ ] **3. Scores on applications and in the stats.** Copy both scores when an application is logged; a split per scorer in `jobfeed stats` and the weekly report; the top-half against bottom-half reply comparison.
 - [ ] **4. Ratings and agreement.** `jobfeed fit rate` (blind, 1–5) and `jobfeed fit compare`: agreement between the scorers, each against your ratings, and the ten biggest disagreements over two weeks old.
 - [ ] **5. Visible scores, after the baseline.** `fit.show: llm` puts the score and reason on each digest entry; `fit.sort: true` orders each section by it. One config change each; the stats split applications by when it was turned on (phase 3 of the tracker's experiment plan).

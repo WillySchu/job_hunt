@@ -29,7 +29,7 @@ from jobfeed.mailer import DEFAULT_ENV, GmailMailer, MailConfigError, Mailer, Se
 from jobfeed.sources import SOURCE_NAMES, SOURCES, Board, FetchResult, fetch_all
 from jobfeed.store import DEFAULT_PATH as DB_PATH
 from jobfeed.store import Store, StoreError, utc_now
-from jobfeed import fit, followups, mailbox, stats, tracker, weekly
+from jobfeed import fit, followups, llm, mailbox, scoring, stats, tracker, weekly
 from jobfeed.imap import GmailReader, ReadError
 from jobfeed.tracker import TrackerError
 
@@ -183,9 +183,13 @@ def _tracker_parsers(sub) -> None:
     fshared = argparse.ArgumentParser(add_help=False)
     fshared.add_argument("--db", type=Path, default=DB_PATH, help="path to jobs.db")
     fshared.add_argument("--config", type=Path, default=CONFIG_PATH, help="path to config.yaml")
-    fsub.add_parser("backfill", parents=[fshared], help="score postings sent before scoring existed")
+    fshared.add_argument("--env", type=Path, default=DEFAULT_ENV, help="file with ANTHROPIC_API_KEY (default .env)")
+    fsub.add_parser("backfill", parents=[fshared],
+                    help="score every posting sent that has no score yet (the LLM within its caps)")
     fsub.add_parser("profile", parents=[fshared], help="the skills and experience read from your resume")
-    fsub.add_parser("status", parents=[fshared], help="how many postings are scored, and against which resume")
+    fsub.add_parser("status", parents=[fshared], help="how many postings are scored, against which resume, and spend")
+    fsub.add_parser("check", parents=[fshared],
+                    help="score one made-up posting with the LLM, to check the key and the reply")
 
     mail = sub.add_parser("mail", parents=[db], help="read replies to the digest and job mail from Gmail now",
                           description="Read new replies to the digest, and job mail (confirmations, rejections, "
@@ -395,7 +399,8 @@ def cmd_run(args: argparse.Namespace, transport: httpx.BaseTransport | None, out
         if write and config.fit.enabled:
             digest_jobs = [e.job for entries in plan.digest.sections.values() for e in entries]
             with make_client(transport) as client:
-                health.fit_note = fit.score_jobs(store, digest_jobs, config, now, client, args.db.parent).note()
+                health.fit_note = scoring.run(store, digest_jobs, config, now, client, args.db.parent,
+                                              args.env).note()
             if health.fit_note:
                 print(health.fit_note, file=err)
 
@@ -942,6 +947,26 @@ def cmd_fit(args: argparse.Namespace, transport: httpx.BaseTransport | None, out
     config = _load_config(args.config, err)
     if config is None:
         return 2
+    if args.fit_command == "check":
+        key = llm.load_key(args.env)
+        if key is None:
+            print(f"no {llm.KEY_NAME} in {args.env} or the environment", file=err)
+            return 2
+        with make_client(transport) as client:
+            try:
+                resume = fit.load_resume(config.fit, args.db.parent, client)
+                s = llm.score_one(client, key, llm.build_prompt(resume, config), scoring.CHECK_POSTING, config)
+            except (fit.ResumeError, llm.LLMError) as exc:
+                print(f"check failed: {exc}", file=err)
+                return 1
+        u = s.working["usage"]
+        print(f"The LLM scorer works ({s.version}). A made-up posting, not one of yours:", file=out)
+        print(f"  {scoring.CHECK_POSTING.title} at {scoring.CHECK_POSTING.company}: {s.score}", file=out)
+        print(f"  {s.reason}", file=out)
+        print(f"  tokens: {u['input_tokens']} in, {u['cache_creation_input_tokens']} cache written, "
+              f"{u['cache_read_input_tokens']} cache read, {u['output_tokens']} out · ${s.working['cost_usd']:.5f}",
+              file=out)
+        return 0
     if args.fit_command == "profile":
         with make_client(transport) as client:
             try:
@@ -961,22 +986,33 @@ def cmd_fit(args: argparse.Namespace, transport: httpx.BaseTransport | None, out
         sent = fit.sent_postings(store)
         if args.fit_command == "backfill":
             with make_client(transport) as client:
-                result = fit.score_jobs(store, sent, config, now, client, args.db.parent)
-            if result.problem:
-                print(f"nothing scored: {result.problem}", file=err)
+                report = scoring.run(store, [], config, now, client, args.db.parent, args.env, everything=True)
+            if report.problem:
+                print(f"nothing scored: {report.problem}", file=err)
                 return 1
-            print(f"Scored {result.scored} of {len(sent)} postings sent; the rest were already scored. "
-                  "Scores stay hidden.", file=out)
+            print(f"Scored {report.keywords} of {len(sent)} postings sent by keywords; the rest were already scored.",
+                  file=out)
+            if report.llm:
+                b = report.llm
+                print(f"Scored {b.scored} by the LLM (${b.cost:.3f})"
+                      + (f"; {b.failed} failed" if b.failed else "")
+                      + (f"; {b.left} left for later runs" if b.left else "")
+                      + (f"; paused: {b.stopped}" if b.stopped else "") + ".", file=out)
+            elif report.llm_off:
+                print(f"LLM scoring off: {report.llm_off}.", file=out)
+            print("Scores stay hidden.", file=out)
             return 0
         done = fit.counts(store)
         hashes = list(store.conn.execute(
             "SELECT resume_hash, COUNT(*) FROM fit_scores GROUP BY resume_hash ORDER BY MAX(scored_at) DESC"))
         missing = len(fit.unscored(store, [j.id for j in sent], fit.KEYWORDS))
+        spent = llm.spent_this_month(store, now)
     print(f"Postings sent: {len(sent)}", file=out)
     for scorer in (fit.KEYWORDS, "llm"):
         print(f"  {scorer:<9} {done.get(scorer, 0)} scored", file=out)
     if missing:
         print(f"  {missing} sent postings have no keyword score yet; `jobfeed fit backfill` scores them", file=out)
+    print(f"LLM spend this month: ${spent:.2f} of ${config.fit.llm_monthly_budget:.2f}", file=out)
     for h, n in hashes:
         print(f"Resume {h}: {n} scores", file=out)
     return 0

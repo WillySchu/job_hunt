@@ -232,7 +232,9 @@ def pi(tmp_path, greenhouse_jobs):
 
 def test_the_run_scores_the_digest_postings_once_and_hides_them(pi, no_sleep):
     code, out, err = pi.run()
-    assert code == 0 and "Fit scores: 2 postings scored (hidden for now)." in err
+    assert code == 0
+    assert "Fit scores: 2 postings scored by keywords; LLM scoring off: no ANTHROPIC_API_KEY in .env (hidden for now)." \
+        in err
     scores = pi.scores()
     assert set(scores) == {("greenhouse:4412983", "keywords"), ("greenhouse:4412990", "keywords")}
     version, score, resume_hash, working = scores[("greenhouse:4412983", "keywords")]
@@ -267,11 +269,12 @@ def test_fit_commands(pi, no_sleep):
     pi.state["resume"] = 200
     _, out, _ = pi.main(["fit", "status", *pi.args])
     assert out.splitlines() == ["Postings sent: 2", "  keywords  0 scored", "  llm       0 scored",
-                                "  2 sent postings have no keyword score yet; `jobfeed fit backfill` scores them"]
+                                "  2 sent postings have no keyword score yet; `jobfeed fit backfill` scores them",
+                                "LLM spend this month: $0.00 of $5.00"]
     code, out, _ = pi.main(["fit", "backfill", *pi.args])
-    assert code == 0 and out.startswith("Scored 2 of 2 postings sent")
+    assert code == 0 and out.startswith("Scored 2 of 2 postings sent by keywords")
     _, out, _ = pi.main(["fit", "backfill", *pi.args])
-    assert out.startswith("Scored 0 of 2 postings sent")
+    assert out.startswith("Scored 0 of 2 postings sent by keywords")
     _, out, _ = pi.main(["fit", "status", *pi.args])
     assert "  keywords  2 scored" in out and out.rstrip().splitlines()[-1].startswith("Resume ")
     code, out, _ = pi.main(["fit", "profile", *pi.args])

@@ -33,8 +33,9 @@ Fit scorer:
 | Milestone | State |
 | --- | --- |
 | 1. Resume and keyword scorer | **Done** — every digest posting gets a hidden keyword score; `jobfeed fit backfill`, `profile`, `status` |
-| 2. LLM scorer | Next, once the Claude Console account is linked to the Max plan |
-| 3–5 | Scores on applications and in the stats; ratings and agreement; visible scores after the baseline |
+| 2. LLM scorer | **Done** — Claude Haiku 5.5 scores each posting too; `jobfeed fit check`; per-run cap and monthly budget |
+| 3. Scores on applications and in the stats | Next |
+| 4–5 | Ratings and agreement; visible scores after the baseline |
 
 ## Setup
 
@@ -381,7 +382,7 @@ To restore, stop the timer (`sudo systemctl stop jobfeed.timer`), copy a backup 
 
 ### Fit scores
 
-Every posting the digest sends gets a fit score from 0 to 100: how well you match what it asks for, as a recruiter would see it. Scores are stored and kept **hidden** while the baseline of ~30 applications builds up, so they can't steer what you apply to; later they're compared against which applications got replies (see [FIT_SCORER_SPEC.md](FIT_SCORER_SPEC.md)). For now there's one scorer, keyword rules; the LLM scorer comes next.
+Every posting the digest sends gets a fit score from 0 to 100: how well you match what it asks for, as a recruiter would see it. Scores are stored and kept **hidden** while the baseline of ~30 applications builds up, so they can't steer what you apply to; later they're compared against which applications got replies (see [FIT_SCORER_SPEC.md](FIT_SCORER_SPEC.md)). There are two scorers, keyword rules and Claude, so they can be compared.
 
 The resume is read from `fit.resume_url` (the `pandoc_resume` repo's `markdown/resume.md`) each run, without its contact line, and a copy is kept in `resume-cache.md` for when GitHub can't be reached. Each score records a hash of the resume it was scored against.
 
@@ -400,7 +401,22 @@ The keyword score, out of 100:
 .venv/bin/jobfeed fit backfill   # score postings sent before scoring existed (run once after installing)
 ```
 
-None of these shows a posting's score. Your skills come from the resume: the terms it names, basic where its entry says "basic" or "some" (some implied too: PostgreSQL gives SQL, Kubernetes gives Docker). `fit.strong`, `fit.basic` and `fit.extra_skills` override by term name, and `fit.extra_terms` adds terms to the ~70 built in. The digest footer says how many postings were scored; if the resume can't be had at all, that run scores nothing and says why, and `fit backfill` catches up.
+#### The LLM scorer
+
+With `ANTHROPIC_API_KEY` in `.env` (an API key from a Claude Console organization; linking it to a Max plan covers the cost with the plan's monthly API credits), each run also sends every new digest posting to Claude Haiku 5.5 with your resume, and stores the score from 0 to 100 and a one-line reason it gives back. Then it works through any backlog, newest first: postings sent before the scorer existed, or ones an earlier run couldn't finish.
+
+```sh
+.venv/bin/jobfeed fit check      # score a made-up posting: checks the key and shows tokens and cost
+.venv/bin/jobfeed fit backfill   # score every sent posting now, rather than a run at a time
+```
+
+- **Cost:** about $0.0003 a posting; the system prompt (instructions and resume, about 1,700 tokens) is cached, so each run's later calls read it at a tenth of the price. The footer reports what was actually spent, from the API's own token counts: "Fit scores: 12 postings scored by keywords; 12 by the LLM ($0.004; $0.21 this month)".
+- **Limits:** at most `fit.llm_max_per_run` (300) a run, and scoring pauses for the rest of the month once `fit.llm_monthly_budget` ($5) is spent; what's left is picked up later.
+- **Failures:** overloads and server errors are retried; a posting that still can't be scored is left for the next run, and a rejected key pauses scoring with a note in the footer. Scoring never stops or delays the digest beyond the calls themselves (four at a time).
+- **What's sent:** each posting's text, and the resume without its contact line. Nothing about your applications.
+- `fit.context_note` adds a line or two the resume doesn't say. The instructions, model and resume are recorded with each score, so changing any of them starts a new version rather than mixing old and new scores.
+
+None of these commands shows a real posting's score. Your skills come from the resume: the terms it names, basic where its entry says "basic" or "some" (some implied too: PostgreSQL gives SQL, Kubernetes gives Docker). `fit.strong`, `fit.basic` and `fit.extra_skills` override by term name, and `fit.extra_terms` adds terms to the ~70 built in. The digest footer says how many postings were scored; if the resume can't be had at all, that run scores nothing and says why, and `fit backfill` catches up.
 
 ## Deploy on the Pi
 
@@ -460,6 +476,8 @@ jobfeed/
   stats.py          # rates, likely ranges, splits, funnel and verdicts for `jobfeed stats`
   weekly.py         # the Monday report email and the weekly backups of jobs.db
   fit.py            # fit scores: the resume, your skills profile, the keyword scorer
+  llm.py            # the LLM scorer: prompt, Messages API call, cost, budget
+  scoring.py        # a run's scoring: keywords, then the LLM for new postings and the backlog
   dedupe.py         # what a run sends: skip sent, one copy per role, 30-day window
   digest.py         # subject, text and HTML bodies, run-health footer
   mailer.py         # .env settings; Gmail SMTP with STARTTLS and retries

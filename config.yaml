@@ -132,3 +132,13 @@ fit:
   basic: []              # e.g. [Machine learning]
   extra_skills: []       # skills you have that the resume doesn't show
   experience_years: 0    # 0: from the resume's earliest date
+  # The LLM scorer: Claude reads each posting against the resume. It runs when
+  # ANTHROPIC_API_KEY is in .env; `jobfeed fit check` tests the key on a made-up
+  # posting. Each run scores its digest postings, then any backlog, newest first.
+  llm: true
+  llm_model: claude-haiku-5-5
+  llm_effort: low
+  llm_max_per_run: 300
+  llm_monthly_budget: 5.0   # USD; scoring pauses for the rest of the month once spent
+  llm_concurrency: 4
+  context_note: ""          # a line or two the resume doesn't say, e.g. recent work not on it yet

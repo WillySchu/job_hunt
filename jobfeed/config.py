@@ -132,6 +132,13 @@ class FitRules:
     basic: list[str] = field(default_factory=list)      # term names to count half
     extra_skills: list[str] = field(default_factory=list)   # term names you have that the resume doesn't show
     experience_years: int = 0      # 0: worked out from the resume's dates
+    context_note: str = ""         # a line or two the resume doesn't say, for the LLM scorer
+    llm: bool = True               # score with Claude too, when ANTHROPIC_API_KEY is in .env
+    llm_model: str = "claude-haiku-5-5"
+    llm_effort: str = "low"
+    llm_max_per_run: int = 300
+    llm_monthly_budget: float = 5.0   # USD; scoring pauses for the month once it's spent
+    llm_concurrency: int = 4
 
 
 @dataclass
@@ -160,6 +167,10 @@ def _check_type(where: str, value: Any, default: Any) -> Any:
     elif isinstance(default, int):
         if isinstance(value, bool) or not isinstance(value, int):
             raise ConfigError(f"{where} must be a whole number (got {value!r})")
+    elif isinstance(default, float):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ConfigError(f"{where} must be a number (got {value!r})")
+        value = float(value)
     elif isinstance(default, str):
         if not isinstance(value, str):
             raise ConfigError(f"{where} must be text (got {value!r})")
@@ -227,6 +238,11 @@ def _validate(cfg: Config) -> None:
         except re.error as exc:
             raise ConfigError(f"`fit.terms` has a bad pattern for {name!r}: {exc}") from exc
         names.append(name.strip().casefold())
+    if cfg.fit.llm_effort not in ("low", "medium", "high", "xhigh", "max"):
+        raise ConfigError(f"`fit.llm_effort` must be low, medium, high, xhigh or max (got {cfg.fit.llm_effort!r})")
+    if cfg.fit.llm_max_per_run < 0 or cfg.fit.llm_monthly_budget < 0 or not 1 <= cfg.fit.llm_concurrency <= 16:
+        raise ConfigError("`fit.llm_max_per_run` and `fit.llm_monthly_budget` can't be negative, and "
+                          "`fit.llm_concurrency` must be 1 to 16")
     for key in ("strong", "basic", "extra_skills"):
         unknown = [t for t in getattr(cfg.fit, key) if t.casefold() not in names]
         if unknown:
