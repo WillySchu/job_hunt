@@ -13,8 +13,8 @@ from urllib.parse import urlsplit, urlunsplit
 from jobfeed.models import Job
 
 DEFAULT_PATH = Path("jobs.db")
-SCHEMA_VERSION = 5  # 2: board_runs; 3: digest codes, applications, events, mail_seen; 4: events.reported;
-                    # 5: meta, notices
+SCHEMA_VERSION = 6  # 2: board_runs; 3: digest codes, applications, events, mail_seen; 4: events.reported;
+                    # 5: meta, notices; 6: fit_scores, fit_ratings, applications.fit_keywords
 FIRST_CODE = 101   # digest codes start here, so every code has at least three digits
 
 _SCHEMA = """
@@ -83,6 +83,22 @@ CREATE TABLE IF NOT EXISTS notices (
   text      TEXT NOT NULL,   -- shown as is in the next digest
   reported  TEXT             -- when a digest carried it
 );
+CREATE TABLE IF NOT EXISTS fit_scores (
+  job_id       TEXT NOT NULL REFERENCES jobs(id),
+  scorer       TEXT NOT NULL,    -- keywords | llm
+  version      TEXT NOT NULL,    -- keywords-1 | claude-haiku-5-5/prompt-...
+  resume_hash  TEXT NOT NULL,    -- the resume it was scored against
+  score        INTEGER NOT NULL, -- 0-100
+  reason       TEXT,             -- the LLM's one line; NULL for keywords
+  working      TEXT,             -- JSON: how the score was reached
+  scored_at    TEXT NOT NULL,
+  PRIMARY KEY (job_id, scorer)
+);
+CREATE TABLE IF NOT EXISTS fit_ratings (
+  job_id    TEXT PRIMARY KEY REFERENCES jobs(id),
+  rating    INTEGER NOT NULL,   -- your blind 1-5
+  rated_at  TEXT NOT NULL
+);
 """
 
 # Columns added to tables after they were first created, and when.
@@ -93,6 +109,9 @@ _ADDED_COLUMNS = {
     ],
     "events": [
         ("reported", "TEXT"),    # 4: when a digest first carried it; NULL until then
+    ],
+    "applications": [
+        ("fit_keywords", "INTEGER"),   # 6: the keyword fit score when logged (fit_score holds the LLM's)
     ],
 }
 

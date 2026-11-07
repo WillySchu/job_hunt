@@ -109,6 +109,7 @@ class Health:
     send_note: str | None = None
     mail_note: str | None = None      # what reading Gmail found, or why it couldn't
     backup_note: str | None = None    # the weekly copy of jobs.db
+    fit_note: str | None = None       # how many postings were fit-scored
 
     @property
     def postings(self) -> int:
@@ -149,6 +150,8 @@ class Health:
             out.append(self.mail_note)
         if self.backup_note:
             out.append(self.backup_note)
+        if self.fit_note:
+            out.append(self.fit_note)
         if self.send_note:
             out.append(self.send_note)
         return out

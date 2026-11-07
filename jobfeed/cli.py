@@ -1,5 +1,5 @@
 """Command-line entry point: `jobfeed run`, `replay`, `discover`, `send-test`, and the tracker commands
-(`apply`, `mark`, `note`, `apps`, `undo`, `edit`, `mail`, `stats`, `weekly`, `backup`)."""
+(`apply`, `mark`, `note`, `apps`, `undo`, `edit`, `mail`, `stats`, `weekly`, `backup`), and `fit`."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ from jobfeed.mailer import DEFAULT_ENV, GmailMailer, MailConfigError, Mailer, Se
 from jobfeed.sources import SOURCE_NAMES, SOURCES, Board, FetchResult, fetch_all
 from jobfeed.store import DEFAULT_PATH as DB_PATH
 from jobfeed.store import Store, StoreError, utc_now
-from jobfeed import followups, mailbox, stats, tracker, weekly
+from jobfeed import fit, followups, mailbox, stats, tracker, weekly
 from jobfeed.imap import GmailReader, ReadError
 from jobfeed.tracker import TrackerError
 
@@ -175,6 +175,17 @@ def _tracker_parsers(sub) -> None:
 
     bk = sub.add_parser("backup", parents=[db], help="copy jobs.db into backups/ now")
     bk.add_argument("--config", type=Path, default=CONFIG_PATH, help="path to config.yaml")
+
+    ft = sub.add_parser("fit", help="fit scores: backfill, your skills profile, status (scores stay hidden)",
+                        description="Fit scores are computed for every posting the digest sends and kept hidden "
+                                    "during the baseline; none of these commands shows a posting's score.")
+    fsub = ft.add_subparsers(dest="fit_command", required=True)
+    fshared = argparse.ArgumentParser(add_help=False)
+    fshared.add_argument("--db", type=Path, default=DB_PATH, help="path to jobs.db")
+    fshared.add_argument("--config", type=Path, default=CONFIG_PATH, help="path to config.yaml")
+    fsub.add_parser("backfill", parents=[fshared], help="score postings sent before scoring existed")
+    fsub.add_parser("profile", parents=[fshared], help="the skills and experience read from your resume")
+    fsub.add_parser("status", parents=[fshared], help="how many postings are scored, and against which resume")
 
     mail = sub.add_parser("mail", parents=[db], help="read replies to the digest and job mail from Gmail now",
                           description="Read new replies to the digest, and job mail (confirmations, rejections, "
@@ -379,6 +390,14 @@ def cmd_run(args: argparse.Namespace, transport: httpx.BaseTransport | None, out
             store.save_jobs([(j, plan.keys[j.id], plan.matched[j.id]) for j in jobs], now)
             codes = store.assign_codes([(e.job.id, name) for name, entries in plan.digest.sections.items()
                                         for e in entries])
+
+        # Fit scores for the postings in this digest; stored, not shown (FIT_SCORER_SPEC.md).
+        if write and config.fit.enabled:
+            digest_jobs = [e.job for entries in plan.digest.sections.values() for e in entries]
+            with make_client(transport) as client:
+                health.fit_note = fit.score_jobs(store, digest_jobs, config, now, client, args.db.parent).note()
+            if health.fit_note:
+                print(health.fit_note, file=err)
 
         # Replies to earlier digests first, so what they log shows in this one.
         if write and config.tracking.read_mail:
@@ -918,6 +937,51 @@ def cmd_backup(args: argparse.Namespace, out: TextIO, err: TextIO, now: datetime
     return 1 if "failed" in note else 0
 
 
+def cmd_fit(args: argparse.Namespace, transport: httpx.BaseTransport | None, out: TextIO, err: TextIO,
+            now: datetime) -> int:
+    config = _load_config(args.config, err)
+    if config is None:
+        return 2
+    if args.fit_command == "profile":
+        with make_client(transport) as client:
+            try:
+                resume = fit.load_resume(config.fit, args.db.parent, client)
+            except fit.ResumeError as exc:
+                print(f"no resume: {exc}", file=err)
+                return 1
+        scorer = fit.Scorer(config, resume, now)
+        print(f"Resume: {resume.source} (hash {resume.hash})", file=out)
+        print("\n".join(scorer.profile.describe()), file=out)
+        print(f"Terms looked for: {len(scorer.terms)} (fit.terms in config.yaml)", file=out)
+        return 0
+    store = _open_store(args.db, err)
+    if store is None:
+        return 2
+    with store:
+        sent = fit.sent_postings(store)
+        if args.fit_command == "backfill":
+            with make_client(transport) as client:
+                result = fit.score_jobs(store, sent, config, now, client, args.db.parent)
+            if result.problem:
+                print(f"nothing scored: {result.problem}", file=err)
+                return 1
+            print(f"Scored {result.scored} of {len(sent)} postings sent; the rest were already scored. "
+                  "Scores stay hidden.", file=out)
+            return 0
+        done = fit.counts(store)
+        hashes = list(store.conn.execute(
+            "SELECT resume_hash, COUNT(*) FROM fit_scores GROUP BY resume_hash ORDER BY MAX(scored_at) DESC"))
+        missing = len(fit.unscored(store, [j.id for j in sent], fit.KEYWORDS))
+    print(f"Postings sent: {len(sent)}", file=out)
+    for scorer in (fit.KEYWORDS, "llm"):
+        print(f"  {scorer:<9} {done.get(scorer, 0)} scored", file=out)
+    if missing:
+        print(f"  {missing} sent postings have no keyword score yet; `jobfeed fit backfill` scores them", file=out)
+    for h, n in hashes:
+        print(f"Resume {h}: {n} scores", file=out)
+    return 0
+
+
 def cmd_undo(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     store = _open_store(args.db, err)
     if store is None:
@@ -972,6 +1036,8 @@ def main(
         return cmd_weekly(args, out, err, now, mailer)
     if args.command == "backup":
         return cmd_backup(args, out, err, now)
+    if args.command == "fit":
+        return cmd_fit(args, transport, out, err, now)
     if args.command == "mail":
         return cmd_mail(args, out, err, now, imap_factory)
     return cmd_discover(args, transport, out, err)

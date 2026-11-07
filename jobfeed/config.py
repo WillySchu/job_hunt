@@ -93,6 +93,47 @@ class TrackingRules:
     attach_backup: bool = True     # attach a gzipped copy of jobs.db to the weekly report
 
 
+# Technical terms the keyword scorer looks for, as "Name: pattern". The pattern is a
+# regular expression matched as whole words, ignoring case; (?-i:...) makes part of it
+# case-sensitive, so "Go" the language isn't "go" the verb. No colon: the name is the pattern.
+DEFAULT_FIT_TERMS = [
+    "Python: python", "Go: (?-i:Go)|golang", "Java: java(?!script)", "JavaScript: javascript|node\\.?js",
+    "TypeScript: typescript", "Rust: rust", "C++: c\\+\\+", "C#: c#", "C: (?<!Series )(?-i:C)(?![+#-])", "Ruby: ruby",
+    "Lua: lua", "Scala: scala", "Kotlin: kotlin", "Elixir: elixir", "Erlang: erlang", "Haskell: haskell",
+    "Clojure: clojure", "PHP: php",
+    "PostgreSQL: postgres(?:ql)?", "MySQL: mysql", "Redis: redis", "MongoDB: mongo(?:db)?",
+    "DynamoDB: dynamo(?:db)?", "Cassandra: cassandra", "Elasticsearch: elastic(?:search)?|opensearch",
+    "Snowflake: snowflake", "BigQuery: bigquery", "ClickHouse: clickhouse", "SQL: sql",
+    "Kafka: kafka", "RabbitMQ: rabbitmq", "Spark: spark", "Flink: flink", "Airflow: airflow",
+    "dbt: (?-i:dbt)",
+    "AWS: aws|amazon web services", "GCP: gcp|google cloud", "Azure: azure",
+    "Kubernetes: kubernetes|k8s", "Docker: docker|containers?", "Terraform: terraform", "Helm: helm",
+    "Linux: linux", "CI/CD: ci/cd|continuous (?:integration|delivery|deployment)",
+    "Grafana: grafana", "Prometheus: prometheus", "Datadog: datadog", "OpenTelemetry: opentelemetry|otel",
+    "Observability: observability|monitoring|alerting",
+    "gRPC: grpc", "GraphQL: graphql", "REST: restful|rest apis?", "API design: api design|apis?",
+    "Microservices: micro-?services", "Distributed systems: distributed systems",
+    "Data pipelines: data pipelines?|etl|data ingestion", "Machine learning: machine learning|ml(?:ops)?",
+    "Caching: caching|cache", "Performance: performance tuning|performance optimi[sz]ation|latency",
+    "Time series: time[- ]series", "Flask: flask", "Django: django", "FastAPI: fastapi",
+    "React: react(?:\\.?js)?", "Angular: angular", "Vue: vue(?:\\.?js)?", "Redux: redux", "Next.js: next\\.?js",
+    "CSS: css|tailwind|sass", "HTML: html",
+]
+
+
+@dataclass
+class FitRules:
+    enabled: bool = True
+    # The resume both scorers read; a local copy is kept beside jobs.db for when it can't be fetched.
+    resume_url: str = "https://raw.githubusercontent.com/WillySchu/pandoc_resume/master/markdown/resume.md"
+    terms: list[str] = field(default_factory=lambda: list(DEFAULT_FIT_TERMS))
+    extra_terms: list[str] = field(default_factory=list)   # added to `terms`, same "Name: pattern" form
+    strong: list[str] = field(default_factory=list)     # term names to count fully, whatever the resume says
+    basic: list[str] = field(default_factory=list)      # term names to count half
+    extra_skills: list[str] = field(default_factory=list)   # term names you have that the resume doesn't show
+    experience_years: int = 0      # 0: worked out from the resume's dates
+
+
 @dataclass
 class Config:
     role: RoleRules = field(default_factory=RoleRules)
@@ -102,11 +143,12 @@ class Config:
     digest: DigestRules = field(default_factory=DigestRules)
     aggregators: AggregatorRules = field(default_factory=AggregatorRules)
     tracking: TrackingRules = field(default_factory=TrackingRules)
+    fit: FitRules = field(default_factory=FitRules)
 
 
 _SECTIONS = {"role": RoleRules, "location": LocationRules, "salary": SalaryRules,
              "seniority": SeniorityRules, "digest": DigestRules, "aggregators": AggregatorRules,
-             "tracking": TrackingRules}
+             "tracking": TrackingRules, "fit": FitRules}
 _REGIONS = {"us", "americas", "global", "other", "unknown"}
 _RANKS = {"junior", "mid", "senior", "staff", "principal"}
 
@@ -177,6 +219,18 @@ def _validate(cfg: Config) -> None:
     cfg.tracking.resume_version = cfg.tracking.resume_version.strip()
     if not cfg.tracking.resume_version:
         raise ConfigError("`tracking.resume_version` is empty; name the resume you send, e.g. v1")
+    names = []
+    for entry in cfg.fit.terms + cfg.fit.extra_terms:
+        name, _, pattern = entry.partition(": ") if ": " in entry else (entry, "", re.escape(entry))
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise ConfigError(f"`fit.terms` has a bad pattern for {name!r}: {exc}") from exc
+        names.append(name.strip().casefold())
+    for key in ("strong", "basic", "extra_skills"):
+        unknown = [t for t in getattr(cfg.fit, key) if t.casefold() not in names]
+        if unknown:
+            raise ConfigError(f"`fit.{key}` names {unknown} that aren't in `fit.terms`")
     cfg.tracking.weekly_day = cfg.tracking.weekly_day.strip().lower()
     if cfg.tracking.weekly_day not in ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"):
         raise ConfigError(f"`tracking.weekly_day` must be a day of the week (got {cfg.tracking.weekly_day!r})")

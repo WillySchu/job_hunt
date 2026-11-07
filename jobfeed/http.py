@@ -73,3 +73,27 @@ def get_json(
         if attempt < retries:
             sleep(_retry_delay(response, attempt))
     raise FetchError(f"{last_problem} from {url} after {retries + 1} attempts")
+
+
+def get_text(client: httpx.Client, url: str, *, retries: int = RETRIES,
+             sleep: Callable[[float], None] | None = None) -> str:
+    """GET a URL as text, with the same retries as get_json."""
+    sleep = sleep or time.sleep
+    last_problem = "no attempt made"
+    for attempt in range(retries + 1):
+        response: httpx.Response | None = None
+        try:
+            response = client.get(url, headers={"Accept": "text/plain, text/markdown, */*"})
+        except httpx.TransportError as exc:
+            last_problem = f"{type(exc).__name__}: {exc}"
+        else:
+            if response.status_code == 404:
+                raise NotFound(url)
+            if response.status_code not in RETRY_STATUSES:
+                if response.is_error:
+                    raise FetchError(f"HTTP {response.status_code} from {url}")
+                return response.text
+            last_problem = f"HTTP {response.status_code}"
+        if attempt < retries:
+            sleep(_retry_delay(response, attempt))
+    raise FetchError(f"{last_problem} from {url} after {retries + 1} attempts")

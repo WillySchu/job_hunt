@@ -1,6 +1,6 @@
 # jobfeed
 
-A daily email digest of new software engineering postings that are remote or in the Seattle area, built to run every morning on a Raspberry Pi as a systemd timer, plus a tracker for the applications you send. The designs are in [JOB_FEED_SPEC.md](JOB_FEED_SPEC.md) and [APPLICATION_TRACKER_SPEC.md](APPLICATION_TRACKER_SPEC.md).
+A daily email digest of new software engineering postings that are remote or in the Seattle area, built to run every morning on a Raspberry Pi as a systemd timer, plus a tracker for the applications you send and a fit score for every posting. The designs are in [JOB_FEED_SPEC.md](JOB_FEED_SPEC.md), [APPLICATION_TRACKER_SPEC.md](APPLICATION_TRACKER_SPEC.md) and [FIT_SCORER_SPEC.md](FIT_SCORER_SPEC.md).
 
 ## Status
 
@@ -27,6 +27,14 @@ Application tracker:
 | 6. Weekly email and backups | **Done** — Monday report email; weekly copies of `jobs.db` in `backups/` |
 | 7. Two weeks of checking | Next: compare what the tracker recorded with your inbox |
 | 8. LinkedIn confirmations | After that |
+
+Fit scorer:
+
+| Milestone | State |
+| --- | --- |
+| 1. Resume and keyword scorer | **Done** — every digest posting gets a hidden keyword score; `jobfeed fit backfill`, `profile`, `status` |
+| 2. LLM scorer | Next, once the Claude Console account is linked to the Max plan |
+| 3–5 | Scores on applications and in the stats; ratings and agreement; visible scores after the baseline |
 
 ## Setup
 
@@ -371,6 +379,29 @@ scp 'pi@raspberrypi.local:job_hunt/backups/*.db' ~/jobfeed-backups/
 
 To restore, stop the timer (`sudo systemctl stop jobfeed.timer`), copy a backup over `jobs.db`, and start it again.
 
+### Fit scores
+
+Every posting the digest sends gets a fit score from 0 to 100: how well you match what it asks for, as a recruiter would see it. Scores are stored and kept **hidden** while the baseline of ~30 applications builds up, so they can't steer what you apply to; later they're compared against which applications got replies (see [FIT_SCORER_SPEC.md](FIT_SCORER_SPEC.md)). For now there's one scorer, keyword rules; the LLM scorer comes next.
+
+The resume is read from `fit.resume_url` (the `pandoc_resume` repo's `markdown/resume.md`) each run, without its contact line, and a copy is kept in `resume-cache.md` for when GitHub can't be reached. Each score records a hash of the resume it was scored against.
+
+The keyword score, out of 100:
+
+| Part | Points | Scored by |
+| --- | --- | --- |
+| Skills | 60 | the share of the technical terms the posting names that you have: required ones count double nice-to-haves, a basic skill half, and a posting naming only a few known terms is pulled toward half marks |
+| Level | 20 | its seniority against `seniority.prefer`: a match 20, one level off 10, unstated 12 |
+| Years | 10 | a stated "N+ years" against your years |
+| Focus | 10 | backend against frontend terms in the description |
+
+```sh
+.venv/bin/jobfeed fit profile    # the skills and years read from your resume
+.venv/bin/jobfeed fit status     # how many postings are scored, and against which resume
+.venv/bin/jobfeed fit backfill   # score postings sent before scoring existed (run once after installing)
+```
+
+None of these shows a posting's score. Your skills come from the resume: the terms it names, basic where its entry says "basic" or "some" (some implied too: PostgreSQL gives SQL, Kubernetes gives Docker). `fit.strong`, `fit.basic` and `fit.extra_skills` override by term name, and `fit.extra_terms` adds terms to the ~70 built in. The digest footer says how many postings were scored; if the resume can't be had at all, that run scores nothing and says why, and `fit backfill` catches up.
+
 ## Deploy on the Pi
 
 jobfeed runs as a systemd service, started every morning at 6:00 Seattle time by a timer. It needs Python 3.11 or newer, which Raspberry Pi OS Bookworm has.
@@ -428,6 +459,7 @@ jobfeed/
   jobmail.py        # tying job mail to an application and recording it
   stats.py          # rates, likely ranges, splits, funnel and verdicts for `jobfeed stats`
   weekly.py         # the Monday report email and the weekly backups of jobs.db
+  fit.py            # fit scores: the resume, your skills profile, the keyword scorer
   dedupe.py         # what a run sends: skip sent, one copy per role, 30-day window
   digest.py         # subject, text and HTML bodies, run-health footer
   mailer.py         # .env settings; Gmail SMTP with STARTTLS and retries
@@ -461,4 +493,5 @@ config.yaml         # filter rules
 companies.yaml      # seed list and watchlist
 JOB_FEED_SPEC.md    # job feed design
 APPLICATION_TRACKER_SPEC.md   # application tracker design
+FIT_SCORER_SPEC.md  # fit scorer design
 ```

@@ -76,7 +76,7 @@ def test_version_2_database_is_upgraded_in_place(tmp_path):
         assert row.job == job and row.code is None
         assert store.next_code() == FIRST_CODE
     conn = sqlite3.connect(db)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 5
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 6
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert {"applications", "events", "mail_seen"} <= tables
     assert "reported" in {r[1] for r in conn.execute("PRAGMA table_info(events)")}

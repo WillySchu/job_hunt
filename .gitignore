@@ -11,5 +11,6 @@ dist/
 .env
 jobs.db
 backups/
+resume-cache.md
 logs/
 companies.yaml.bak

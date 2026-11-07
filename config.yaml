@@ -114,3 +114,21 @@ tracking:
   # Gmail, off the Pi. If it ever grows too big to attach, the report says so at
   # the top (and warns beforehand).
   attach_backup: true
+
+fit:
+  # Every posting the digest sends gets a fit score from 0 to 100: how well you
+  # match what it asks for. Scores are stored but hidden during the baseline
+  # (FIT_SCORER_SPEC.md); `jobfeed fit profile` shows what was read from the
+  # resume, and never shows a posting's score.
+  enabled: true
+  resume_url: https://raw.githubusercontent.com/WillySchu/pandoc_resume/master/markdown/resume.md
+  # The keyword scorer looks for ~70 built-in technical terms (`fit.terms`; see
+  # DEFAULT_FIT_TERMS in jobfeed/config.py). Add your own as "Name: pattern",
+  # a regular expression matched as whole words, ignoring case:
+  extra_terms: []        # e.g. ["Ray: ray", "Kubeflow: kubeflow"]
+  # Your skills come from the resume: terms it names, basic where its entry
+  # says "basic" or "some". Override by term name:
+  strong: []             # e.g. [JavaScript]
+  basic: []              # e.g. [Machine learning]
+  extra_skills: []       # skills you have that the resume doesn't show
+  experience_years: 0    # 0: from the resume's earliest date

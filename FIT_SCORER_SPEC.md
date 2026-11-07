@@ -46,7 +46,7 @@ A sum of four parts, out of 100, from plain rules anyone can check. It's free, i
 
 | Part | Points | How it's scored |
 | --- | --- | --- |
-| Skills | 60 | Of the technical terms the posting names, the share you have, from a term list in `config.yaml` (languages, databases, cloud, infrastructure, domains such as distributed systems). Terms under a requirements heading count double those under nice-to-have. A strong skill counts fully, a basic one (C, Ruby, Lua on your resume) half. |
+| Skills | 60 | Of the technical terms the posting names, the share you have, from a built-in list of about 70 terms that `config.yaml` can add to (languages, databases, cloud, infrastructure, domains such as distributed systems). Terms under a requirements heading count double those under nice-to-have. A strong skill counts fully, a basic one (C, Ruby, Lua on your resume) half. A posting that names only a few known terms is pulled toward half marks, so one matching term says less than six. |
 | Level | 20 | The posting's seniority against `seniority.prefer` (senior, staff): a match 20, one level off 10, further 0, unstated 12. |
 | Years | 10 | A stated "N+ years": 10 if you have them, else 0; 10 when none is stated. |
 | Focus | 10 | Backend terms against frontend terms in the description, reusing the role filter's lists: all backend 10, evenly mixed 5, mostly frontend 0. |
@@ -127,9 +127,9 @@ The weekly backup and its email attachment cover the new tables, since they're i
 
 ## Build plan
 
-Five milestones, numbered by design but not built in that order. Milestones 1 and 4 need no account and come first. The LLM scorer (2) waits until API access is settled, then backfills every posting already sent, since their text is stored. Milestone 3 follows whichever scorers exist, and 5 comes after the baseline.
+Five milestones, built in order. The first two start scoring every posting, hidden, so the baseline is scored from now on; the LLM scorer also backfills every posting already sent, since their text is stored. The rest compare the scorers and, after the baseline, show the scores.
 
-- [ ] **1. Resume and keyword scorer.** Fetch the resume, schema 6, the keyword scorer, scoring each run's digest postings, and `jobfeed fit backfill`. Done when every posting sent has a keyword score.
+- [x] **1. Resume and keyword scorer.** Fetch the resume, schema 6, the keyword scorer, scoring each run's digest postings, and `jobfeed fit backfill`. Done when every posting sent has a keyword score.
 - [ ] **2. LLM scorer.** The API key, Haiku 5.5 with structured outputs and a cached system prompt, four calls at a time, the per-run and monthly caps, retries, and the cost line in the footer. Done when every posting sent has both scores, including the backfill.
 - [ ] **3. Scores on applications and in the stats.** Copy both scores when an application is logged; a split per scorer in `jobfeed stats` and the weekly report; the top-half against bottom-half reply comparison.
 - [ ] **4. Ratings and agreement.** `jobfeed fit rate` (blind, 1–5) and `jobfeed fit compare`: agreement between the scorers, each against your ratings, and the ten biggest disagreements over two weeks old.
@@ -146,9 +146,9 @@ Five milestones, numbered by design but not built in that order. Milestones 1 an
 | Spend | An unexpected bill | Per-run and monthly caps; actual cost in the footer |
 | Model retirement | Haiku 5.5 eventually goes | Not before October 7, 2027; scores are versioned, so a successor starts a new version |
 
-- [ ] API access for the LLM scorer: no Console account yet, and undecided. Max, Ultra and Team plans include monthly API credits ($100 on Max) that cover the scorer once a Console organization is linked; Pro has none. Nothing is lost by waiting: `jobs.db` keeps every posting's text, so the LLM scorer can backfill whenever it's added.
+- [x] API access: a Claude Console organization linked to your Max plan, whose $100 of monthly API credits covers the scorer. Set up before milestone 2.
 - [x] `markdown/resume.md` on `master` is the resume being sent (`v1`).
-- [ ] A $5 monthly cap is fine, once API access is settled.
+- [x] A $5 monthly cap.
 - [x] Your ratings ask "how strong a candidate are you for this, 1–5?"
 - [x] Both scorers, compared once there's data.
 - [x] A single number; the LLM's reason stored but not shown yet.
