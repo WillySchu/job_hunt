@@ -174,7 +174,7 @@ def pi(tmp_path, greenhouse_jobs):
     p = Pi()
     p.gmail = gmail
     code, _, err = p.run(0)
-    assert code == 0 and "Gmail: no new replies." in err
+    assert code == 0 and "Gmail: no new replies or job mail." in err
     return p
 
 
@@ -184,7 +184,7 @@ def test_a_reply_logs_applications_and_the_next_digest_confirms_it(pi):
                        "Thanks!\nrejected 4l8", sent=EVENING))
     code, out, err = pi.run(1)
     assert code == 0
-    assert "Gmail: 1 reply, 3 lines run, 1 not used (see Your applications)." in err
+    assert "Gmail: 1 reply, 3 lines run, 1 not used." in err
     block = out.split("== Your applications\n", 1)[1].split("\n\n", 1)[0]
     assert block.splitlines() == [
         "  Logged since the last digest",
@@ -204,7 +204,7 @@ def test_a_reply_logs_applications_and_the_next_digest_confirms_it(pi):
 
     # read once: the next run finds nothing new, and searches from a day before the last check
     code, out, err = pi.run(2)
-    assert "Gmail: no new replies." in err and "Your applications" not in out
+    assert "Gmail: no new replies or job mail." in err and "Your applications" not in out
     assert pi.gmail.queries[-1].endswith('after:2026/11/06"')
 
 
@@ -250,7 +250,7 @@ def test_mail_command_and_its_dry_run(pi):
     code, out, _ = pi.mail(1)
     assert code == 0 and pi.app(101) is not None
     _, out, _ = pi.mail(1)
-    assert out.startswith("No new replies since")
+    assert out.startswith("Nothing new since")
     pi.mail(1, "--days", "30")
     assert pi.gmail.queries[-1].endswith('after:2026/10/08"')
 

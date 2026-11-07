@@ -97,3 +97,8 @@ tracking:
   # with the same app password) and carries out the commands in them. IMAP has
   # to be on: Gmail → Settings → See all settings → Forwarding and POP/IMAP.
   read_mail: true
+  # Job mail is read from these applicant-tracking systems' sending domains, and
+  # from the companies you have open applications with. Add a domain if a
+  # company's confirmations come from a system not listed (`jobfeed mail
+  # --dry-run` shows what was read).
+  ats_senders: [greenhouse-mail.io, greenhouse.io, lever.co, ashbyhq.com]

@@ -44,7 +44,7 @@ class Activity:
     changes: list[Change] = field(default_factory=list)      # everything else that happened to them
     follow_ups: list[FollowUp] = field(default_factory=list)
     event_ids: list[int] = field(default_factory=list)       # to mark reported once the digest is sent
-    notices: list[tuple[int, str]] = field(default_factory=list)   # (id, text): reply lines that weren't used
+    notices: list[tuple[int, str, str]] = field(default_factory=list)   # (id, kind, text), not yet reported
 
     @property
     def empty(self) -> bool:
@@ -106,8 +106,8 @@ def gather(store: Store | None, rules: TrackingRules, now: datetime, *, write: b
     if write:
         close_unanswered(store, rules, now)
     activity = Activity()
-    activity.notices = [(i, t) for i, t in store.conn.execute(
-        "SELECT id, text FROM notices WHERE reported IS NULL ORDER BY id")]
+    activity.notices = list(store.conn.execute(
+        "SELECT id, kind, text FROM notices WHERE reported IS NULL ORDER BY id"))
     apps: dict[int, Application] = {}
 
     def app_for(code: int) -> Application:
@@ -151,7 +151,7 @@ def record(store: Store, activity: Activity, now: datetime) -> None:
         store.conn.executemany("UPDATE events SET reported = ? WHERE id = ? AND reported IS NULL",
                                [(stamp, i) for i in activity.event_ids])
         store.conn.executemany("UPDATE notices SET reported = ? WHERE id = ?",
-                               [(stamp, i) for i, _ in activity.notices])
+                               [(stamp, i) for i, _, _ in activity.notices])
         for f in activity.follow_ups:
             _add_event(store, f.app.code, "follow_up", now, RULE, detail=f"quiet {f.days} days", reported=now)
 
@@ -170,6 +170,8 @@ def logged_line(c: Change) -> str:
         extras.append("referral")
     if c.event.origin == "reply":
         extras.append("from your reply")
+    elif c.event.origin == "email":
+        extras.append(f"from its confirmation email (`jobfeed edit {c.app.code} --resume V` if you sent another)")
     return f"{role(c.app)} · {' · '.join(extras)}"
 
 
@@ -182,11 +184,13 @@ def change_line(c: Change) -> str:
         what = f"reply {day}"
     elif e.kind == "reopened":
         what = f"reopened {day}"
+    elif e.kind == "confirmation":
+        what = f"confirmation email {day}"
     elif e.kind in ("rejected", "withdrawn") and e.detail:
         what = f"{stage_label(e.kind)} {day} (at {stage_label(e.detail)})"
     else:
         what = f"{stage_label(e.kind)} {day}"
-    if e.origin == "email":
+    if e.origin == "email" and e.kind != "confirmation":
         what += " (from email)"
     elif e.origin == "reply":
         what += " (from your reply)"
@@ -207,8 +211,10 @@ def blocks(activity: Activity, follow_up_days: int) -> list[tuple[str, list[str]
     """(heading, lines) for each non-empty part, in digest order."""
     parts = [
         ("Logged since the last digest", [logged_line(c) for c in activity.logged]),
-        ("Not done from your replies", [text for _, text in activity.notices]),
+        ("Not done from your replies", [t for _, k, t in activity.notices if k != "check"]),
         ("Updates", [change_line(c) for c in activity.changes]),
         (f"Follow up (nothing new in {follow_up_days}+ days)", [follow_up_line(f) for f in activity.follow_ups]),
+        ("Check these (job mail it couldn't place; reply with a command such as `screen 412`, or leave it)",
+         [t for _, k, t in activity.notices if k == "check"]),
     ]
     return [(h, lines) for h, lines in parts if lines]

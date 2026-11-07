@@ -22,8 +22,9 @@ Application tracker:
 | 1. Applications and codes | **Done** — schema 3, digest codes, `apply`, `mark`, `note`, `apps`, `undo` |
 | 2. Daily follow-ups | **Done** — "Your applications" in the digest, 10-day follow-ups, 21-day no-response rule |
 | 3. Gmail reader and replies | **Done** — read-only IMAP; reply to the digest with commands; `jobfeed mail` |
-| 4. Mail classifier | Next |
-| 5–8 | Stats, weekly email and backups, checking, LinkedIn confirmations |
+| 4. Mail classifier | **Done** — confirmations, rejections, interview requests and offers read from Gmail; "Check these"; `jobfeed edit` |
+| 5. Stats | Next |
+| 6–8 | Weekly email and backups, checking, LinkedIn confirmations |
 
 ## Setup
 
@@ -283,13 +284,35 @@ note 412 recruiter call Tue 2pm
 - The quoted digest under your reply, signatures and lines like "Thanks!" are ignored. A line that can't be read or carried out is quoted back under "Not done from your replies", with the reason.
 - Only replies from `GMAIL_USER` or a `DIGEST_TO` address count, and only if Gmail sent them from your account or verified the sender (DMARC), so a forged "From: you" does nothing. Each message is read once.
 
-jobfeed only ever asks Gmail for mail from your own addresses with "Job feed" in the subject, opens All Mail read-only, and never marks, moves or deletes anything. It keeps each message's Gmail ID, so it isn't read twice, and nothing else from it.
+#### Job mail
+
+Each run also reads mail from companies about your applications, and records what it says:
+
+| It reads as | Typical wording | What it does |
+| --- | --- | --- |
+| Confirmation | "Thank you for applying", "we've received your application" | Logs the application if you haven't (from the posting it names); otherwise notes it. An earlier confirmation corrects the applied date |
+| Rejection | "not moving forward", "decided to move forward with other candidates" | Rejected, recording the stage it had reached |
+| Interview request | "your availability", "I'd love to set up a call", a scheduling link | Screen; interview if already past the screen; a reply if already interviewing |
+| Offer | "pleased to extend an offer", "offer letter" | Offer |
+| Reply | A person at the company, none of the above | A reply; the stage stays |
+
+- **Which mail.** Gmail is asked for mail from the applicant-tracking systems in `tracking.ats_senders` (Greenhouse, Lever and Ashby to start) and from the companies you have open applications with, by name. Newsletters and other automated company mail with none of that wording are passed over.
+- **Which application.** A link to the posting itself decides first; then the sender's own domain (jobs@duckduckgo.com is DuckDuckGo) or the company's name in the email, with the role title settling between several roles at one company. Mail about a role you haven't logged is never put on one you have.
+- **Check these.** Mail it can't place, or whose wording it can't read, is listed under "Check these" in the next digest with its sender, subject and the reason. Reply with a command (`screen 412`) or leave it.
+- An application logged from its confirmation email gets the default resume version; `jobfeed edit 412 --resume v2` changes it. `edit` also sets `--cover-letter` / `--no-cover-letter`, `--referral` / `--no-referral`, and `--via` for roles found elsewhere.
+
+#### Checking what it reads
+
+jobfeed opens All Mail read-only and never marks, moves or deletes anything. It keeps each message's Gmail ID, so it isn't read twice, and what it read the message as; nothing else from it.
 
 ```sh
-.venv/bin/jobfeed mail             # read new replies now, as the next run would
-.venv/bin/jobfeed mail --dry-run   # show what they'd do; save nothing
-.venv/bin/jobfeed mail --days 30   # look further back than the last check (replies already read are skipped)
+.venv/bin/jobfeed mail                      # read new replies and job mail now, as the next run would
+.venv/bin/jobfeed mail --dry-run            # show how each new message reads and what it would do; save nothing
+.venv/bin/jobfeed mail --days 30            # look further back than the last check (mail already read is skipped)
+.venv/bin/jobfeed mail --dry-run --reread --days 14   # read the last two weeks again with the current rules
 ```
+
+The dry run prints each job email with what it was read as and the phrase that decided it, which is the way to check a company's mail is understood. If a company's confirmations come from a system that isn't listed, add its sending domain to `tracking.ats_senders`.
 
 If Gmail can't be read, the digest still goes out, and its footer says why; the next run catches up.
 
@@ -346,6 +369,8 @@ jobfeed/
   replies.py        # commands in replies to the digest: reading, parsing, carrying out
   mailbox.py        # checking Gmail for replies: search, verify, run, remember
   imap.py           # read-only Gmail IMAP client (X-GM-RAW search, BODY.PEEK)
+  classify.py       # what a job email means: confirmation, rejection, interview, offer, reply
+  jobmail.py        # tying job mail to an application and recording it
   dedupe.py         # what a run sends: skip sent, one copy per role, 30-day window
   digest.py         # subject, text and HTML bodies, run-health footer
   mailer.py         # .env settings; Gmail SMTP with STARTTLS and retries

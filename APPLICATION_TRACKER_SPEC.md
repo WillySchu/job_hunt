@@ -85,8 +85,8 @@ Each run reads new job mail before building the digest. Access is read-only and 
 
 **What it reads.** Gmail runs the search on its side, over All Mail so archived messages count, starting a day before the last successful check:
 
-- mail from Greenhouse, Lever and Ashby's sending addresses (the exact addresses get confirmed from the first real emails);
-- mail from the domain of any company you have an open application with;
+- mail from the applicant-tracking systems' sending domains in `tracking.ats_senders` (Greenhouse, Lever and Ashby to start; more can be added as real mail shows up);
+- mail from any company you have an open application with, searched by its name, which Gmail matches in sender names and addresses;
 - your replies to the digest.
 
 Nothing else in the inbox is fetched. Each message considered is remembered by its Gmail ID, so none is counted twice.
@@ -95,17 +95,21 @@ Nothing else in the inbox is fetched. Each message considered is remembered by i
 
 | Kind | Typical wording | Effect |
 | --- | --- | --- |
-| Confirmation | "Thank you for applying", "we've received your application" | Logs the application if it's new; otherwise an event |
+| Confirmation | "Thank you for applying", "we've received your application" | Logs the application if it's new; otherwise a `confirmation` event, which also corrects an applied date logged later |
 | Rejection | "not moving forward", "decided to pursue other candidates" | Rejected, recording the stage it had reached |
-| Interview request | "schedule", "your availability", a scheduling link | Screen, or interview if already past the screen |
+| Interview request | "your availability", "I'd love to set up a call", a scheduling link | Screen, or interview if already past the screen; a reply if already interviewing |
 | Offer | "pleased to offer", "offer letter" | Offer |
 | Other reply | A person, not a no-reply address, at the company's domain | Records a first reply; stage unchanged |
 
-**Matching.** A message is tied to an application by the company's email domain first, then by company name and role title in the subject or body. A message that matches no application, or two, isn't acted on.
+**Matching.** A message is tied to an application by a link to the posting itself first, then a link to the company's job board, then the company's email domain (the sender's, or Reply-To for mail sent through an ATS), then the company's name in the sender name, subject or opening lines. The role title settles between several applications at one company. A message that matches no application, or two, isn't acted on, and mail that names a role you haven't logged is never put on one you have. Newsletters and mailing lists, and automated company mail with none of the job wording, are passed over.
+
+**Wording.** Rejections win over the "thank you for applying" they usually open with. An email that reads as both a confirmation and an interview request is an invitation when a person wrote it, and goes to "Check these" when an automated address did.
 
 **When it's unsure.** Unmatched messages, and ones whose wording fits no kind or more than one, go in a "Check these" list in the next digest, with sender and subject. Reply with a command (`screen 412`, `rejected 412`) or leave it. Once the scorer exists (item 2), it can take a first pass at these.
 
 **What it keeps.** For each message it acted on: the Gmail ID, the date, the kind it was read as, and the application. No bodies or attachments are stored.
+
+**Checking the rules.** `jobfeed mail --dry-run` prints each new message with what it was read as and the phrase that decided it, and `--reread --days N` runs the current rules over mail already read. `jobfeed edit CODE --resume v2` (also `--cover-letter`, `--referral`, `--via`) fixes the details of an application logged from its confirmation.
 
 ## Metrics and reports
 
@@ -186,6 +190,7 @@ CREATE TABLE events (
   at          TEXT NOT NULL,
   kind        TEXT NOT NULL,   -- applied | reply | screen | interview | offer | accepted | declined
                                -- | rejected | withdrawn | no_response | reopened | note | follow_up
+                               -- | confirmation
   origin      TEXT NOT NULL,   -- cli | reply | email | rule
   message_id  TEXT,            -- the Gmail message it came from
   detail      TEXT,            -- the stage a rejection came at, or a note's text
@@ -201,7 +206,7 @@ CREATE TABLE meta (              -- schema 5
 CREATE TABLE notices (           -- schema 5: reply lines not used, until a digest reports them
   id        INTEGER PRIMARY KEY,
   at        TEXT NOT NULL,
-  kind      TEXT NOT NULL,        -- reply_line | unverified
+  kind      TEXT NOT NULL,        -- reply_line | unverified | check
   text      TEXT NOT NULL,
   reported  TEXT
 );
@@ -244,7 +249,7 @@ Tracking starts with milestone 1, so the baseline can begin while the rest is bu
 - [x] **1. Applications and codes.** Schema 3, digest codes (`#412`), and `jobfeed apply`, `mark`, `note`, `apps` and `undo`. Done when you can log today's applications.
 - [x] **2. Daily follow-ups.** The "Your applications" block in the digest, the 10-day follow-up and the 21-day "no response" rule.
 - [x] **3. Gmail reader and replies.** Read-only IMAP, `mail_seen`, and digest replies run as commands. Done when a reply to the digest logs an application.
-- [ ] **4. Mail classifier.** Confirmation, rejection, interview, offer and other reply; matching mail to applications; the "Check these" list; and `jobfeed mail --dry-run`, which shows how each recent message would be read without acting on it.
+- [x] **4. Mail classifier.** Confirmation, rejection, interview, offer and other reply; matching mail to applications; the "Check these" list; and `jobfeed mail --dry-run`, which shows how each recent message would be read without acting on it.
 - [ ] **5. Stats.** `jobfeed stats` with cuts, likely ranges and "too few to tell".
 - [ ] **6. Weekly email and backups.** The Monday report, and the weekly copy of `jobs.db`.
 - [ ] **7. Two weeks of checking.** Compare the tracker's stages with your inbox, and add rules for any mail it misread.
@@ -265,7 +270,7 @@ The biggest risk is misread mail. A missed rejection makes the funnel look bette
 
 **Open questions**
 
-- [ ] The exact sending addresses for Greenhouse, Lever and Ashby mail, to confirm from your first confirmations.
+- [ ] The exact sending addresses for Greenhouse, Lever and Ashby mail, to confirm from your first confirmations with `jobfeed mail --dry-run --reread`. They're a setting (`tracking.ats_senders`), so a new one is a config change. Ashby is confirmed: DuckDuckGo's confirmation came from `no-reply@ashbyhq.com`, with the company in the sender name ("DuckDuckGo Hiring Team") and the role in the subject. Greenhouse and Lever are still to see.
 - [x] LinkedIn's "your application was sent" emails: deferred to a short follow-up after the tracking work (milestone 8).
 - [x] Thresholds: 10 days for a follow-up and 21 days for "no response" to start, both adjustable in config.yaml.
 - [x] Resume `v1` is your one current resume. Each version's file gets stored with its label when resume versions (item 3) begin.

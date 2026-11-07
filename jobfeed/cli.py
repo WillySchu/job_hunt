@@ -1,5 +1,5 @@
 """Command-line entry point: `jobfeed run`, `replay`, `discover`, `send-test`, and the tracker commands
-(`apply`, `mark`, `note`, `apps`, `undo`, `mail`)."""
+(`apply`, `mark`, `note`, `apps`, `undo`, `edit`, `mail`)."""
 
 from __future__ import annotations
 
@@ -146,13 +146,23 @@ def _tracker_parsers(sub) -> None:
     undo = sub.add_parser("undo", parents=[db], help="remove an application's latest entry")
     undo.add_argument("code", type=_code, metavar="CODE")
 
-    mail = sub.add_parser("mail", parents=[db], help="read your replies to the digest from Gmail now",
-                          description="Read new replies to the digest from Gmail and carry out their commands, "
-                                      "as `jobfeed run` does before each digest.")
+    edit = sub.add_parser("edit", parents=[db], help="change how an application was sent: resume, cover letter, ...")
+    edit.add_argument("code", type=_code, metavar="CODE")
+    edit.add_argument("--resume", metavar="VERSION", help="the resume version you sent")
+    edit.add_argument("--cover-letter", action=argparse.BooleanOptionalAction, default=None)
+    edit.add_argument("--referral", action=argparse.BooleanOptionalAction, default=None)
+    edit.add_argument("--via", choices=tracker.VIA_CHOICES, help="where you found a role jobfeed never saw")
+
+    mail = sub.add_parser("mail", parents=[db], help="read replies to the digest and job mail from Gmail now",
+                          description="Read new replies to the digest, and job mail (confirmations, rejections, "
+                                      "interview requests, offers), from Gmail and act on them, as `jobfeed run` "
+                                      "does before each digest.")
     mail.add_argument("--dry-run", action="store_true",
-                      help="show what the new replies would do, and save nothing (they're still read next run)")
+                      help="show how each new message would be read and what it would do; save nothing")
     mail.add_argument("--days", type=int, metavar="N",
-                      help="look back N days instead of from the last check (replies already read are skipped)")
+                      help="look back N days instead of from the last check (mail already read is skipped)")
+    mail.add_argument("--reread", action="store_true",
+                      help="with --dry-run: include mail already read, to see how the current rules read it")
     mail.add_argument("--env", type=Path, default=DEFAULT_ENV, help="file with the Gmail settings (default .env)")
     mail.add_argument("--config", type=Path, default=CONFIG_PATH, help="path to config.yaml")
 
@@ -720,11 +730,15 @@ def cmd_mail(args: argparse.Namespace, out: TextIO, err: TextIO, now: datetime, 
         store = Store.scratch_copy(args.db) if args.dry_run else Store.open(args.db)
     except StoreError as exc:
         return _store_error(exc, err)
+    if args.reread and not args.dry_run:
+        print("--reread only works with --dry-run, since acting on mail twice would record it twice", file=err)
+        return 2
     since = now - timedelta(days=args.days) if args.days else None
     with store:
         try:
             with GmailReader(settings, imap_factory=imap_factory) as reader:
-                result = mailbox.check(store, reader, settings, config.tracking, now, since=since)
+                result = mailbox.check(store, reader, settings, config.tracking, now, since=since,
+                                       reread=args.reread)
         except ReadError as exc:
             print(f"Couldn't read Gmail: {exc}", file=err)
             return 1
@@ -737,9 +751,41 @@ def cmd_mail(args: argparse.Namespace, out: TextIO, err: TextIO, now: datetime, 
             print(f"  {'ok ' if o.ok else 'NOT'}  {o.line}  →  {o.text}", file=out)
     for who in result.unverified:
         print(f"Ignored, as Gmail couldn't verify it came from you: {who}", file=out)
-    if not result.replies and not result.unverified:
-        print(f"No new replies since {tracker.local_day(result.since)}.", file=out)
+    for item in result.job_mail:
+        r = item.result
+        sent = item.at.astimezone()
+        read_as = f"{r.reading.kind} (“{r.reading.why}”)" if r.reading.kind else "unclear"
+        print(f"{tracker.local_day(sent)}, {sent:%H:%M}  {item.who}  “{item.subject}”", file=out)
+        print(f"  read as: {read_as}", file=out)
+        print(f"  {'done' if r.done else 'CHECK'}: {r.action}", file=out)
+    if result.passed_over:
+        print(f"Passed over {result.passed_over} other company email{'' if result.passed_over == 1 else 's'} "
+              "(newsletters and the like).", file=out)
+    if not result.replies and not result.unverified and not result.job_mail:
+        print(f"Nothing new since {tracker.local_day(result.since)}.", file=out)
     print(result.summary() + (" Dry run: nothing was saved." if args.dry_run else ""), file=err)
+    return 0
+
+
+def cmd_edit(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    changes = {k: v for k, v in [("resume_version", args.resume), ("cover_letter", args.cover_letter),
+                                 ("referral", args.referral), ("found_via", args.via)] if v is not None}
+    if not changes:
+        print("nothing to change; give --resume, --cover-letter / --no-cover-letter, --referral / --no-referral "
+              "or --via", file=err)
+        return 2
+    store = _open_store(args.db, err)
+    if store is None:
+        return 2
+    with store:
+        try:
+            app = tracker.edit(store, args.code, **changes)
+        except TrackerError as exc:
+            print(f"not changed: {exc}", file=err)
+            return 1
+    print(f"#{app.code} {app.company} — {app.title}: resume {app.resume_version or 'unrecorded'}, "
+          f"{'cover letter' if app.cover_letter else 'no cover letter'}, "
+          f"{'referral' if app.referral else 'no referral'}, found via {app.found_via}", file=out)
     return 0
 
 
@@ -789,6 +835,8 @@ def main(
         return cmd_apps(args, out, err, now)
     if args.command == "undo":
         return cmd_undo(args, out, err)
+    if args.command == "edit":
+        return cmd_edit(args, out, err)
     if args.command == "mail":
         return cmd_mail(args, out, err, now, imap_factory)
     return cmd_discover(args, transport, out, err)

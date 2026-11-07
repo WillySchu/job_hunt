@@ -212,6 +212,7 @@ class LogOptions:
     note: str | None = None
     logged_via: str = "code"
     origin: str = "cli"
+    message_id: str | None = None   # the email it was logged from
 
 
 def _insert(store: Store, code: int, *, job_id: str | None, company: str, title: str, url: str | None,
@@ -222,7 +223,7 @@ def _insert(store: Store, code: int, *, job_id: str | None, company: str, title:
          int(opts.cover_letter), None, None, _ts(first_seen) if first_seen else None, _ts(opts.applied_at),
          opts.logged_via, "applied", _ts(opts.applied_at), None),
     )
-    _add_event(store, code, "applied", opts.applied_at, opts.origin)
+    _add_event(store, code, "applied", opts.applied_at, opts.origin, message_id=opts.message_id)
     if opts.note:
         _add_event(store, code, "note", opts.applied_at, opts.origin, detail=opts.note)
     _refresh(store, code)
@@ -301,6 +302,28 @@ def add_note(store: Store, code: int, text: str, at: datetime, *, origin: str = 
     return app
 
 
+def edit(store: Store, code: int, **changes) -> Application:
+    """Change how an application was sent: resume_version, cover_letter, referral, found_via."""
+    allowed = {"resume_version", "cover_letter", "referral", "found_via"}
+    assert set(changes) <= allowed, changes
+    app = get_application(store, code)
+    if app is None:
+        raise TrackerError(f"no application #{code}; `jobfeed apps --all` lists them")
+    if "found_via" in changes and app.job_id is not None:
+        raise TrackerError(f"#{code} came from a posting jobfeed found, so where you found it is already known")
+    if "resume_version" in changes:
+        changes["resume_version"] = changes["resume_version"].strip()
+        if not changes["resume_version"]:
+            raise TrackerError("the resume version is empty")
+    values = {k: (int(v) if isinstance(v, bool) else v) for k, v in changes.items()}
+    with store.conn:
+        store.conn.execute(f"UPDATE applications SET {', '.join(f'{k} = ?' for k in values)} WHERE code = ?",
+                           (*values.values(), code))
+    updated = get_application(store, code)
+    assert updated is not None
+    return updated
+
+
 def undo(store: Store, code: int) -> str:
     """Remove the last entry made (not the latest-dated one); removing the only entry, the
     application itself, removes the application. Returns what it did."""
@@ -366,6 +389,8 @@ def detail_lines(app: Application, source_name: str, section_name: str | None) -
             text = f"note: {e.detail}"
         elif e.kind == "follow_up":
             text = "follow-up reminder"
+        elif e.kind == "confirmation":
+            text = "confirmation email"
         elif e.kind == "no_response" and e.detail:
             text += f" ({e.detail})"
         lines.append(f"  {e.at.astimezone():%Y-%m-%d}  {text:<34} via {e.origin}")
