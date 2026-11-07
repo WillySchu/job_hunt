@@ -21,8 +21,9 @@ Application tracker:
 | --- | --- |
 | 1. Applications and codes | **Done** — schema 3, digest codes, `apply`, `mark`, `note`, `apps`, `undo` |
 | 2. Daily follow-ups | **Done** — "Your applications" in the digest, 10-day follow-ups, 21-day no-response rule |
-| 3. Gmail reader and replies | Next |
-| 4–8 | Mail classifier, stats, weekly email and backups, checking, LinkedIn confirmations |
+| 3. Gmail reader and replies | **Done** — read-only IMAP; reply to the digest with commands; `jobfeed mail` |
+| 4. Mail classifier | Next |
+| 5–8 | Stats, weekly email and backups, checking, LinkedIn confirmations |
 
 ## Setup
 
@@ -132,6 +133,8 @@ chmod 600 .env          # it holds a password; jobfeed warns if others can read 
 ```
 
 `send-test` sends a two-line message to `DIGEST_TO` and reports what Gmail said if it fails. A rejected login usually means a normal password was used instead of an app password. Settings in the environment override `.env`, and `--env PATH` reads another file.
+
+Each run also reads your replies to the digest from Gmail, with the same app password. That needs IMAP turned on once: Gmail → Settings → See all settings → Forwarding and POP/IMAP → Enable IMAP. `.venv/bin/jobfeed mail` checks it works. To skip reading, set `tracking.read_mail: false`.
 
 ### Run for real
 
@@ -256,7 +259,37 @@ Each morning's digest opens with a "Your applications" block, left out when ther
 - **Follow up** lists an open application, at any stage, once nothing has been entered for it in `tracking.follow_up_days` (10). Each quiet stretch is listed once, and the reminder shows in `jobfeed apps CODE`. Any new entry for it, a note included, starts a new stretch. An application with news in the same digest waits a day.
 - **No response.** An application still at applied, with no reply `tracking.no_response_days` (21) after you applied, is closed as no response, dated the day the limit passed. Only applied closes this way; interview loops often pause for weeks, so later stages just get follow-ups. If you're still hopeful, `jobfeed mark CODE reopen` puts it back and restarts the 21 days; if they did answer, `jobfeed mark CODE reply` records it and reopens it. (`undo` won't remove the rule's closure, since the rule would only close it again.)
 
-`run --dry-run` shows the block as the run would send it, including what the rule would close, without saving anything.
+`run --dry-run` shows the block as the run would send it, including what the rule would close, without saving anything. It doesn't read Gmail.
+
+#### Replying to the digest
+
+Instead of logging on the Pi, reply to the morning email with one command per line. The next run reads it, carries it out, and confirms it in that digest:
+
+```
+applied 412 418
+applied 430 resume v2 referral cover letter
+applied 431 yesterday note found it through Sam
+screen 412
+interview 412 onsite with the platform team
+rejected 418 on 2026-11-05
+withdrew 430
+note 412 recruiter call Tue 2pm
+```
+
+- The commands are the CLI's: `applied` with `resume V`, `referral`, `cover letter` / `no cover letter`, a date and `note …`; any stage `jobfeed mark` takes, with an optional date (words after the codes become a note); and `note`.
+- Each takes one or more codes. Without a date, an entry is dated when you sent the reply; a date can be `2026-11-05`, `on 2026-11-05`, `today` or `yesterday`.
+- The quoted digest under your reply, signatures and lines like "Thanks!" are ignored. A line that can't be read or carried out is quoted back under "Not done from your replies", with the reason.
+- Only replies from `GMAIL_USER` or a `DIGEST_TO` address count, and only if Gmail sent them from your account or verified the sender (DMARC), so a forged "From: you" does nothing. Each message is read once.
+
+jobfeed only ever asks Gmail for mail from your own addresses with "Job feed" in the subject, opens All Mail read-only, and never marks, moves or deletes anything. It keeps each message's Gmail ID, so it isn't read twice, and nothing else from it.
+
+```sh
+.venv/bin/jobfeed mail             # read new replies now, as the next run would
+.venv/bin/jobfeed mail --dry-run   # show what they'd do; save nothing
+.venv/bin/jobfeed mail --days 30   # look further back than the last check (replies already read are skipped)
+```
+
+If Gmail can't be read, the digest still goes out, and its footer says why; the next run catches up.
 
 ## Deploy on the Pi
 
@@ -308,6 +341,9 @@ jobfeed/
   store.py          # jobs.db: postings, first/last seen, sent, digest codes
   tracker.py        # applications and their events: apply, mark, note, list, undo
   followups.py      # the digest's "Your applications" block; follow-up and no-response rules
+  replies.py        # commands in replies to the digest: reading, parsing, carrying out
+  mailbox.py        # checking Gmail for replies: search, verify, run, remember
+  imap.py           # read-only Gmail IMAP client (X-GM-RAW search, BODY.PEEK)
   dedupe.py         # what a run sends: skip sent, one copy per role, 30-day window
   digest.py         # subject, text and HTML bodies, run-health footer
   mailer.py         # .env settings; Gmail SMTP with STARTTLS and retries

@@ -83,6 +83,7 @@ class TrackingRules:
     cover_letter: bool = False     # whether you usually send one; --cover-letter / --no-cover-letter override
     follow_up_days: int = 10       # list an open application in the digest after this many quiet days
     no_response_days: int = 21     # close an application with no reply after this many days
+    read_mail: bool = True         # read your replies to the digest from Gmail on each run
 
 
 @dataclass

@@ -44,10 +44,11 @@ class Activity:
     changes: list[Change] = field(default_factory=list)      # everything else that happened to them
     follow_ups: list[FollowUp] = field(default_factory=list)
     event_ids: list[int] = field(default_factory=list)       # to mark reported once the digest is sent
+    notices: list[tuple[int, str]] = field(default_factory=list)   # (id, text): reply lines that weren't used
 
     @property
     def empty(self) -> bool:
-        return not (self.logged or self.changes or self.follow_ups)
+        return not (self.logged or self.changes or self.follow_ups or self.notices)
 
 
 # --- the rules -----------------------------------------------------------------------
@@ -105,6 +106,8 @@ def gather(store: Store | None, rules: TrackingRules, now: datetime, *, write: b
     if write:
         close_unanswered(store, rules, now)
     activity = Activity()
+    activity.notices = [(i, t) for i, t in store.conn.execute(
+        "SELECT id, text FROM notices WHERE reported IS NULL ORDER BY id")]
     apps: dict[int, Application] = {}
 
     def app_for(code: int) -> Application:
@@ -147,6 +150,8 @@ def record(store: Store, activity: Activity, now: datetime) -> None:
     with store.conn:
         store.conn.executemany("UPDATE events SET reported = ? WHERE id = ? AND reported IS NULL",
                                [(stamp, i) for i in activity.event_ids])
+        store.conn.executemany("UPDATE notices SET reported = ? WHERE id = ?",
+                               [(stamp, i) for i, _ in activity.notices])
         for f in activity.follow_ups:
             _add_event(store, f.app.code, "follow_up", now, RULE, detail=f"quiet {f.days} days", reported=now)
 
@@ -163,6 +168,8 @@ def logged_line(c: Change) -> str:
         extras.append(f"resume {c.app.resume_version}")
     if c.app.referral:
         extras.append("referral")
+    if c.event.origin == "reply":
+        extras.append("from your reply")
     return f"{role(c.app)} · {' · '.join(extras)}"
 
 
@@ -181,6 +188,8 @@ def change_line(c: Change) -> str:
         what = f"{stage_label(e.kind)} {day}"
     if e.origin == "email":
         what += " (from email)"
+    elif e.origin == "reply":
+        what += " (from your reply)"
     return f"{role(c.app)} · {what}"
 
 
@@ -198,6 +207,7 @@ def blocks(activity: Activity, follow_up_days: int) -> list[tuple[str, list[str]
     """(heading, lines) for each non-empty part, in digest order."""
     parts = [
         ("Logged since the last digest", [logged_line(c) for c in activity.logged]),
+        ("Not done from your replies", [text for _, text in activity.notices]),
         ("Updates", [change_line(c) for c in activity.changes]),
         (f"Follow up (nothing new in {follow_up_days}+ days)", [follow_up_line(f) for f in activity.follow_ups]),
     ]

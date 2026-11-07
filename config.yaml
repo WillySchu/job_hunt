@@ -93,3 +93,7 @@ tracking:
   # CODE reopen` restarts the clock). Later stages are never closed this way.
   follow_up_days: 10
   no_response_days: 21
+  # Each run reads your replies to the digest from Gmail (read-only, over IMAP,
+  # with the same app password) and carries out the commands in them. IMAP has
+  # to be on: Gmail → Settings → See all settings → Forwarding and POP/IMAP.
+  read_mail: true

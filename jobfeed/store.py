@@ -13,7 +13,8 @@ from urllib.parse import urlsplit, urlunsplit
 from jobfeed.models import Job
 
 DEFAULT_PATH = Path("jobs.db")
-SCHEMA_VERSION = 4  # 2: board_runs; 3: digest codes, applications, events, mail_seen; 4: events.reported
+SCHEMA_VERSION = 5  # 2: board_runs; 3: digest codes, applications, events, mail_seen; 4: events.reported;
+                    # 5: meta, notices
 FIRST_CODE = 101   # digest codes start here, so every code has at least three digits
 
 _SCHEMA = """
@@ -71,6 +72,17 @@ CREATE TABLE IF NOT EXISTS mail_seen (
   kind        TEXT,               -- what it was read as; NULL if ignored
   code        INTEGER             -- the application it was tied to
 );
+CREATE TABLE IF NOT EXISTS meta (
+  key    TEXT PRIMARY KEY,   -- e.g. mail_checked
+  value  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS notices (
+  id        INTEGER PRIMARY KEY,
+  at        TEXT NOT NULL,
+  kind      TEXT NOT NULL,   -- reply_line: a reply line that couldn't be used
+  text      TEXT NOT NULL,   -- shown as is in the next digest
+  reported  TEXT             -- when a digest carried it
+);
 """
 
 # Columns added to tables after they were first created, and when.
@@ -118,6 +130,23 @@ class StoreError(Exception):
     """jobs.db is unreadable or from a newer version of jobfeed."""
 
 
+def _migrate(conn: sqlite3.Connection, path: Path) -> None:
+    """Create the schema, or bring an older one up to date."""
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version > SCHEMA_VERSION:
+        conn.close()
+        raise StoreError(f"{path} was written by a newer jobfeed (schema {version}); upgrade jobfeed")
+    conn.executescript(_SCHEMA)
+    for table, added in _ADDED_COLUMNS.items():
+        present = _columns(conn, table)
+        for name, kind in added:
+            if name not in present:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS jobs_code ON jobs(code)")
+    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    conn.commit()
+
+
 class Store:
     def __init__(self, conn: sqlite3.Connection, path: Path, readonly: bool):
         self.conn = conn
@@ -125,7 +154,7 @@ class Store:
         self.readonly = readonly
         # A read-only open of an older database may lack the newer columns and tables.
         self.has_codes = "code" in _job_columns(conn)
-        self.has_tracker = "reported" in _columns(conn, "events")
+        self.has_tracker = "reported" in _columns(conn, "events") and bool(_columns(conn, "notices"))
 
     # --- opening ------------------------------------------------------------
 
@@ -134,22 +163,24 @@ class Store:
         """Open for writing, creating the file and schema if needed."""
         try:
             conn = sqlite3.connect(path)
-            version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if version > SCHEMA_VERSION:
-                conn.close()
-                raise StoreError(f"{path} was written by a newer jobfeed (schema {version}); upgrade jobfeed")
-            conn.executescript(_SCHEMA)
-            for table, added in _ADDED_COLUMNS.items():
-                present = _columns(conn, table)
-                for name, kind in added:
-                    if name not in present:
-                        conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
-            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS jobs_code ON jobs(code)")
-            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            conn.commit()
+            _migrate(conn, path)
         except sqlite3.DatabaseError as exc:
             raise StoreError(f"can't open {path}: {exc}") from exc
         return cls(conn, path, readonly=False)
+
+    @classmethod
+    def scratch_copy(cls, path: Path = DEFAULT_PATH) -> Store:
+        """A writable copy of jobs.db in memory, for trying something out; the file is never touched."""
+        try:
+            mem = sqlite3.connect(":memory:")
+            if path.exists():
+                src = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
+                src.backup(mem)
+                src.close()
+            _migrate(mem, path)
+        except sqlite3.DatabaseError as exc:
+            raise StoreError(f"can't read {path}: {exc}") from exc
+        return cls(mem, path, readonly=False)
 
     @classmethod
     def open_readonly(cls, path: Path = DEFAULT_PATH) -> Store | None:
@@ -236,6 +267,15 @@ class Store:
         except sqlite3.OperationalError:
             return {}  # a read-only copy of a schema-1 database has no board history yet
         return found
+
+    def get_meta(self, key: str) -> str | None:
+        row = self.conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        self._writable()
+        with self.conn:
+            self.conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value))
 
     def count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]

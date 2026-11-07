@@ -1,5 +1,5 @@
 """Command-line entry point: `jobfeed run`, `replay`, `discover`, `send-test`, and the tracker commands
-(`apply`, `mark`, `note`, `apps`, `undo`)."""
+(`apply`, `mark`, `note`, `apps`, `undo`, `mail`)."""
 
 from __future__ import annotations
 
@@ -28,7 +28,8 @@ from jobfeed.mailer import DEFAULT_ENV, GmailMailer, MailConfigError, Mailer, Se
 from jobfeed.sources import SOURCE_NAMES, SOURCES, Board, FetchResult, fetch_all
 from jobfeed.store import DEFAULT_PATH as DB_PATH
 from jobfeed.store import Store, StoreError, utc_now
-from jobfeed import followups, tracker
+from jobfeed import followups, mailbox, tracker
+from jobfeed.imap import GmailReader, ReadError
 from jobfeed.tracker import TrackerError
 
 def _parse_board(spec: str) -> Board:
@@ -145,6 +146,16 @@ def _tracker_parsers(sub) -> None:
     undo = sub.add_parser("undo", parents=[db], help="remove an application's latest entry")
     undo.add_argument("code", type=_code, metavar="CODE")
 
+    mail = sub.add_parser("mail", parents=[db], help="read your replies to the digest from Gmail now",
+                          description="Read new replies to the digest from Gmail and carry out their commands, "
+                                      "as `jobfeed run` does before each digest.")
+    mail.add_argument("--dry-run", action="store_true",
+                      help="show what the new replies would do, and save nothing (they're still read next run)")
+    mail.add_argument("--days", type=int, metavar="N",
+                      help="look back N days instead of from the last check (replies already read are skipped)")
+    mail.add_argument("--env", type=Path, default=DEFAULT_ENV, help="file with the Gmail settings (default .env)")
+    mail.add_argument("--config", type=Path, default=CONFIG_PATH, help="path to config.yaml")
+
 
 # --- rendering -------------------------------------------------------------
 
@@ -218,8 +229,23 @@ def _store_error(exc: StoreError, err: TextIO) -> int:
     return 2
 
 
+def _read_gmail(store: Store, settings, config: Config, now: datetime, imap_factory, err: TextIO,
+                env: Path) -> str:
+    """Read replies before the digest is built; returns the footer line. Never stops the run."""
+    if settings is None:
+        try:
+            settings = load_settings(env)
+        except (MailConfigError, OSError):
+            return f"Gmail not read: no Gmail settings in {env}."
+    try:
+        with GmailReader(settings, imap_factory=imap_factory) as reader:
+            return mailbox.check(store, reader, settings, config.tracking, now).summary()
+    except ReadError as exc:
+        return f"Couldn't read Gmail: {exc}. The next run will pick up any replies."
+
+
 def cmd_run(args: argparse.Namespace, transport: httpx.BaseTransport | None, out: TextIO, err: TextIO,
-            today: date, now: datetime, mailer: Mailer | None = None) -> int:
+            today: date, now: datetime, mailer: Mailer | None = None, imap_factory=None) -> int:
     config = _load_config(args.config, err)
     if config is None:
         return 2
@@ -279,6 +305,11 @@ def cmd_run(args: argparse.Namespace, transport: httpx.BaseTransport | None, out
             store.save_jobs([(j, plan.keys[j.id], plan.matched[j.id]) for j in jobs], now)
             codes = store.assign_codes([(e.job.id, name) for name, entries in plan.digest.sections.items()
                                         for e in entries])
+
+        # Replies to earlier digests first, so what they log shows in this one.
+        if write and config.tracking.read_mail:
+            health.mail_note = _read_gmail(store, settings, config, now, imap_factory, err, args.env)
+            print(health.mail_note, file=err)
 
         # The "Your applications" block. A real run applies the no-response rule
         # first; a dry run shows what it would close without saving it.
@@ -676,6 +707,42 @@ def cmd_apps(args: argparse.Namespace, out: TextIO, err: TextIO, now: datetime) 
     return 0
 
 
+def cmd_mail(args: argparse.Namespace, out: TextIO, err: TextIO, now: datetime, imap_factory=None) -> int:
+    config = _load_config(args.config, err)
+    if config is None:
+        return 2
+    try:
+        settings = load_settings(args.env)
+    except (MailConfigError, OSError) as exc:
+        print(f"email settings: {exc}", file=err)
+        return 2
+    try:
+        store = Store.scratch_copy(args.db) if args.dry_run else Store.open(args.db)
+    except StoreError as exc:
+        return _store_error(exc, err)
+    since = now - timedelta(days=args.days) if args.days else None
+    with store:
+        try:
+            with GmailReader(settings, imap_factory=imap_factory) as reader:
+                result = mailbox.check(store, reader, settings, config.tracking, now, since=since)
+        except ReadError as exc:
+            print(f"Couldn't read Gmail: {exc}", file=err)
+            return 1
+    for reply in result.replies:
+        sent = reply.sent_at.astimezone()
+        print(f"Reply of {tracker.local_day(sent)}, {sent:%H:%M} (“{reply.subject}”)", file=out)
+        if not reply.outcomes:
+            print("  (no command lines)", file=out)
+        for o in reply.outcomes:
+            print(f"  {'ok ' if o.ok else 'NOT'}  {o.line}  →  {o.text}", file=out)
+    for who in result.unverified:
+        print(f"Ignored, as Gmail couldn't verify it came from you: {who}", file=out)
+    if not result.replies and not result.unverified:
+        print(f"No new replies since {tracker.local_day(result.since)}.", file=out)
+    print(result.summary() + (" Dry run: nothing was saved." if args.dry_run else ""), file=err)
+    return 0
+
+
 def cmd_undo(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     store = _open_store(args.db, err)
     if store is None:
@@ -698,15 +765,16 @@ def main(
     err: TextIO | None = None,
     now: datetime | None = None,
     mailer: Mailer | None = None,
+    imap_factory=None,
 ) -> int:
-    """`mailer` replaces Gmail in tests; settings are still read from --env."""
+    """`mailer` and `imap_factory` replace Gmail in tests; settings are still read from --env."""
     out = out or sys.stdout
     err = err or sys.stderr
     now = now or utc_now()
     today = now.astimezone().date()
     args = build_parser().parse_args(argv)
     if args.command == "run":
-        return cmd_run(args, transport, out, err, today, now, mailer)
+        return cmd_run(args, transport, out, err, today, now, mailer, imap_factory)
     if args.command == "replay":
         return cmd_replay(args, out, err, today, now)
     if args.command == "send-test":
@@ -721,6 +789,8 @@ def main(
         return cmd_apps(args, out, err, now)
     if args.command == "undo":
         return cmd_undo(args, out, err)
+    if args.command == "mail":
+        return cmd_mail(args, out, err, now, imap_factory)
     return cmd_discover(args, transport, out, err)
 
 

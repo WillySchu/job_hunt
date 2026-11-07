@@ -85,6 +85,7 @@ class Health:
     dropped: dict[str, int] = field(default_factory=dict)               # stage -> count
     aggregators_used: list[str] = field(default_factory=list)
     send_note: str | None = None
+    mail_note: str | None = None      # what reading Gmail found, or why it couldn't
 
     @property
     def postings(self) -> int:
@@ -121,6 +122,8 @@ class Health:
             names = [SOURCE_NAMES.get(a, a) for a in self.aggregators_used]
             listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
             out.append(f"Remote listings via {listed}.")
+        if self.mail_note:
+            out.append(self.mail_note)
         if self.send_note:
             out.append(self.send_note)
         return out

@@ -29,6 +29,12 @@ def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(jobfeed.http, "make_client", guarded)
     monkeypatch.setattr(jobfeed.cli, "make_client", guarded)
 
+    def no_imap(*args, **kwargs):
+        raise ConnectionRefusedError("test tried to reach Gmail")
+
+    import imaplib
+    monkeypatch.setattr(imaplib, "IMAP4_SSL", no_imap)
+
 
 @pytest.fixture
 def greenhouse_jobs() -> dict:

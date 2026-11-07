@@ -69,7 +69,7 @@ There are four ways in, and all four lead to the same record. Anything logged si
    note 412 recruiter call Tue 2pm
    ```
 
-   Only replies from your own addresses (`GMAIL_USER` or `DIGEST_TO`) count, and the quoted original below your reply is ignored. Any line it can't read is quoted back in the next digest.
+   Only replies from your own addresses (`GMAIL_USER` or `DIGEST_TO`) count, and only when Gmail sent them from your account or verified the sender (DMARC), so a forged "From: you" does nothing. The quoted original below your reply, signatures, and lines that are plainly not commands ("Thanks!") are ignored. Any line it can't read or carry out is quoted back in the next digest, with the reason. Any CLI stage works (`interview 412 onsite`, with the words after the codes kept as a note), as do the `applied` options, and a date (`on 2026-11-05`, `yesterday`); without one, entries are dated when the reply was sent. `jobfeed mail` reads replies on demand, and `jobfeed mail --dry-run` shows what they would do.
 3. **Manual entry** for roles found elsewhere: `jobfeed apply --url https://… --company Acme --title "Senior Backend Engineer" --via referral`. It gets the next code. If the link matches a posting jobfeed has stored (ignoring any `?query` or `#fragment`), the posting's fields are copied in and `--company`, `--title` and `--via` aren't needed.
 4. **Confirmation emails.** When a Greenhouse, Lever or Ashby "thanks for applying" email arrives for a role you haven't logged, jobfeed creates the application, matched to a stored posting where it can. The digest lists these so you can add a resume version or fix a wrong match.
 
@@ -154,7 +154,7 @@ How the rules work in detail:
 Three new tables join `jobs` in `jobs.db`, and jobfeed upgrades an existing database on its next run. The events table is the record; an application's current stage is kept alongside it only for quick listing.
 
 ```sql
--- schema 3 (schema 4 adds events.reported)
+-- schema 3 (schema 4 adds events.reported; schema 5 adds meta and notices)
 ALTER TABLE jobs ADD COLUMN code INTEGER;      -- digest number, set when a posting is first emailed
 ALTER TABLE jobs ADD COLUMN section TEXT;      -- the digest section it was emailed in
 CREATE UNIQUE INDEX jobs_code ON jobs(code);
@@ -193,6 +193,19 @@ CREATE TABLE events (
 );
 CREATE INDEX events_code ON events(code, at);
 
+CREATE TABLE meta (              -- schema 5
+  key    TEXT PRIMARY KEY,        -- mail_checked: the last successful Gmail check
+  value  TEXT NOT NULL
+);
+
+CREATE TABLE notices (           -- schema 5: reply lines not used, until a digest reports them
+  id        INTEGER PRIMARY KEY,
+  at        TEXT NOT NULL,
+  kind      TEXT NOT NULL,        -- reply_line | unverified
+  text      TEXT NOT NULL,
+  reported  TEXT
+);
+
 CREATE TABLE mail_seen (
   message_id  TEXT PRIMARY KEY,   -- Gmail's ID, so a message is never counted twice
   seen_at     TEXT NOT NULL,
@@ -230,7 +243,7 @@ Tracking starts with milestone 1, so the baseline can begin while the rest is bu
 
 - [x] **1. Applications and codes.** Schema 3, digest codes (`#412`), and `jobfeed apply`, `mark`, `note`, `apps` and `undo`. Done when you can log today's applications.
 - [x] **2. Daily follow-ups.** The "Your applications" block in the digest, the 10-day follow-up and the 21-day "no response" rule.
-- [ ] **3. Gmail reader and replies.** Read-only IMAP, `mail_seen`, and digest replies run as commands. Done when a reply to the digest logs an application.
+- [x] **3. Gmail reader and replies.** Read-only IMAP, `mail_seen`, and digest replies run as commands. Done when a reply to the digest logs an application.
 - [ ] **4. Mail classifier.** Confirmation, rejection, interview, offer and other reply; matching mail to applications; the "Check these" list; and `jobfeed mail --dry-run`, which shows how each recent message would be read without acting on it.
 - [ ] **5. Stats.** `jobfeed stats` with cuts, likely ranges and "too few to tell".
 - [ ] **6. Weekly email and backups.** The Monday report, and the weekly copy of `jobs.db`.
