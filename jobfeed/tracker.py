@@ -48,6 +48,7 @@ class Event:
     origin: str
     message_id: str | None = None
     detail: str | None = None
+    reported: datetime | None = None   # when a digest first carried it
 
 
 @dataclass
@@ -133,9 +134,10 @@ def _application(row: tuple) -> Application:
 
 def events_for(store: Store, code: int) -> list[Event]:
     rows = store.conn.execute(
-        "SELECT id, code, at, kind, origin, message_id, detail FROM events WHERE code = ? ORDER BY at, id", (code,))
-    return [Event(id=i, code=c, at=_dt(at), kind=k, origin=o, message_id=m, detail=d)
-            for i, c, at, k, o, m, d in rows]
+        "SELECT id, code, at, kind, origin, message_id, detail, reported FROM events WHERE code = ? ORDER BY at, id",
+        (code,))
+    return [Event(id=i, code=c, at=_dt(at), kind=k, origin=o, message_id=m, detail=d, reported=_dt(r))
+            for i, c, at, k, o, m, d, r in rows]
 
 
 def get_application(store: Store, code: int, *, with_events: bool = False) -> Application | None:
@@ -192,9 +194,11 @@ def _refresh(store: Store, code: int) -> None:
 
 
 def _add_event(store: Store, code: int, kind: str, at: datetime, origin: str, detail: str | None = None,
-               message_id: str | None = None) -> None:
-    store.conn.execute("INSERT INTO events (code, at, kind, origin, message_id, detail) VALUES (?, ?, ?, ?, ?, ?)",
-                       (code, _ts(at), kind, origin, message_id, detail))
+               message_id: str | None = None, reported: datetime | None = None) -> int:
+    cur = store.conn.execute(
+        "INSERT INTO events (code, at, kind, origin, message_id, detail, reported) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (code, _ts(at), kind, origin, message_id, detail, _ts(reported) if reported else None))
+    return cur.lastrowid
 
 
 # --- writing -----------------------------------------------------------------------
@@ -303,9 +307,14 @@ def undo(store: Store, code: int) -> str:
     app = get_application(store, code, with_events=True)
     if app is None:
         raise TrackerError(f"no application #{code}; `jobfeed apps --all` lists them")
-    last = max(app.events, key=lambda e: e.id)
+    yours = [e for e in app.events if e.kind != "follow_up"]   # reminders are the digest's, not yours
+    last = max(yours, key=lambda e: e.id)
+    if last.kind == "no_response" and last.origin == "rule":
+        raise TrackerError(f"#{code} was closed by the no-reply rule, which would just close it again; "
+                           f"`jobfeed mark {code} reopen` keeps it open and restarts the clock, and "
+                           f"`jobfeed mark {code} reply` records an answer")
     with store.conn:
-        if last.kind == "applied" and len(app.events) == 1:
+        if last.kind == "applied" and len(yours) == 1:
             store.conn.execute("DELETE FROM events WHERE code = ?", (code,))
             store.conn.execute("DELETE FROM applications WHERE code = ?", (code,))
             return f"removed #{code} {app.company}, {app.title} from the tracker"
@@ -355,5 +364,9 @@ def detail_lines(app: Application, source_name: str, section_name: str | None) -
             text += f" (at {stage_label(e.detail)})"
         elif e.kind == "note" and e.detail:
             text = f"note: {e.detail}"
-        lines.append(f"  {e.at.astimezone():%Y-%m-%d}  {text:<28} via {e.origin}")
+        elif e.kind == "follow_up":
+            text = "follow-up reminder"
+        elif e.kind == "no_response" and e.detail:
+            text += f" ({e.detail})"
+        lines.append(f"  {e.at.astimezone():%Y-%m-%d}  {text:<34} via {e.origin}")
     return lines

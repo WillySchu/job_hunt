@@ -20,8 +20,9 @@ Application tracker:
 | Milestone | State |
 | --- | --- |
 | 1. Applications and codes | **Done** — schema 3, digest codes, `apply`, `mark`, `note`, `apps`, `undo` |
-| 2. Daily follow-ups | Next |
-| 3–8 | Gmail reader, mail classifier, stats, weekly email and backups, checking, LinkedIn confirmations |
+| 2. Daily follow-ups | **Done** — "Your applications" in the digest, 10-day follow-ups, 21-day no-response rule |
+| 3. Gmail reader and replies | Next |
+| 4–8 | Mail classifier, stats, weekly email and backups, checking, LinkedIn confirmations |
 
 ## Setup
 
@@ -235,6 +236,28 @@ The other stages are `accepted`, `declined`, `withdrawn` (or `withdrew`), `no-re
 
 Every change is kept as a dated entry, and the stage is worked out from those entries, so `undo` and a late `--date` always leave it right. `apply` exits with status 1 if any code couldn't be logged (the others are still logged) and 2 for a usage mistake.
 
+#### In the digest
+
+Each morning's digest opens with a "Your applications" block, left out when there's nothing to say:
+
+```
+== Your applications
+  Logged since the last digest
+    #412 Stripe — Senior Backend Engineer · applied Nov 6 · resume v1
+  Updates
+    #398 Acme — Platform Engineer · screen Nov 6
+    #377 Orbit — SRE · no response: no reply in 21 days, closed Nov 5
+  Follow up (nothing new in 10+ days)
+    #380 Motive — Backend Engineer · applied Oct 27 · quiet 10 days
+    #371 Pixel — Staff Engineer · interview since Oct 24 · quiet 13 days
+```
+
+- **Logged and Updates** list everything entered since the last digest went out (notes aren't listed). If the email fails, nothing counts as reported, so the next digest carries it.
+- **Follow up** lists an open application, at any stage, once nothing has been entered for it in `tracking.follow_up_days` (10). Each quiet stretch is listed once, and the reminder shows in `jobfeed apps CODE`. Any new entry for it, a note included, starts a new stretch. An application with news in the same digest waits a day.
+- **No response.** An application still at applied, with no reply `tracking.no_response_days` (21) after you applied, is closed as no response, dated the day the limit passed. Only applied closes this way; interview loops often pause for weeks, so later stages just get follow-ups. If you're still hopeful, `jobfeed mark CODE reopen` puts it back and restarts the 21 days; if they did answer, `jobfeed mark CODE reply` records it and reopens it. (`undo` won't remove the rule's closure, since the rule would only close it again.)
+
+`run --dry-run` shows the block as the run would send it, including what the rule would close, without saving anything.
+
 ## Deploy on the Pi
 
 jobfeed runs as a systemd service, started every morning at 6:00 Seattle time by a timer. It needs Python 3.11 or newer, which Raspberry Pi OS Bookworm has.
@@ -284,6 +307,7 @@ jobfeed/
   config.py         # config.yaml loader and validation
   store.py          # jobs.db: postings, first/last seen, sent, digest codes
   tracker.py        # applications and their events: apply, mark, note, list, undo
+  followups.py      # the digest's "Your applications" block; follow-up and no-response rules
   dedupe.py         # what a run sends: skip sent, one copy per role, 30-day window
   digest.py         # subject, text and HTML bodies, run-health footer
   mailer.py         # .env settings; Gmail SMTP with STARTTLS and retries

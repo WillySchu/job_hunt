@@ -81,6 +81,8 @@ class AggregatorRules:
 class TrackingRules:
     resume_version: str = "v1"     # recorded on each `jobfeed apply` unless --resume says otherwise
     cover_letter: bool = False     # whether you usually send one; --cover-letter / --no-cover-letter override
+    follow_up_days: int = 10       # list an open application in the digest after this many quiet days
+    no_response_days: int = 21     # close an application with no reply after this many days
 
 
 @dataclass
@@ -167,6 +169,8 @@ def _validate(cfg: Config) -> None:
     cfg.tracking.resume_version = cfg.tracking.resume_version.strip()
     if not cfg.tracking.resume_version:
         raise ConfigError("`tracking.resume_version` is empty; name the resume you send, e.g. v1")
+    if cfg.tracking.follow_up_days < 1 or cfg.tracking.no_response_days < 1:
+        raise ConfigError("`tracking.follow_up_days` and `tracking.no_response_days` must be at least 1")
 
 
 def load_config(path: Path = DEFAULT_PATH) -> Config:

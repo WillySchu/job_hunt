@@ -28,7 +28,7 @@ from jobfeed.mailer import DEFAULT_ENV, GmailMailer, MailConfigError, Mailer, Se
 from jobfeed.sources import SOURCE_NAMES, SOURCES, Board, FetchResult, fetch_all
 from jobfeed.store import DEFAULT_PATH as DB_PATH
 from jobfeed.store import Store, StoreError, utc_now
-from jobfeed import tracker
+from jobfeed import followups, tracker
 from jobfeed.tracker import TrackerError
 
 def _parse_board(spec: str) -> Board:
@@ -149,8 +149,8 @@ def _tracker_parsers(sub) -> None:
 # --- rendering -------------------------------------------------------------
 
 def render_digest(digest: Digest, *, show_dropped: bool, today: date, out: TextIO, noun: str = "new",
-                  codes: dict[str, int] | None = None) -> None:
-    print(render_text(digest, today, show_dropped=show_dropped, noun=noun, codes=codes), file=out)
+                  codes: dict[str, int] | None = None, apps=None) -> None:
+    print(render_text(digest, today, show_dropped=show_dropped, noun=noun, codes=codes, apps=apps), file=out)
 
 
 def _drop_summary(digest: Digest) -> str:
@@ -201,6 +201,16 @@ def _summary(plan: Plan, args: argparse.Namespace, err: TextIO, noun: str = "new
         parts.append(f"{len(plan.already_sent)} already sent")
     parts.append(_drop_summary(digest) + ("" if args.all or not digest.dropped else " (add --all to see why)"))
     print(" · ".join(parts), file=err)
+
+
+def _activity_summary(activity: followups.Activity) -> str:
+    closed = sum(1 for c in activity.changes if c.event.kind == "no_response" and c.event.origin == followups.RULE)
+    updates = len(activity.changes) - closed
+    parts = [f"{len(activity.logged)} logged", f"{updates} update{'' if updates == 1 else 's'}"]
+    if closed:
+        parts.append(f"{closed} closed with no reply")
+    parts.append(f"{len(activity.follow_ups)} to follow up")
+    return " · ".join(parts)
 
 
 def _store_error(exc: StoreError, err: TextIO) -> int:
@@ -270,14 +280,19 @@ def cmd_run(args: argparse.Namespace, transport: httpx.BaseTransport | None, out
             codes = store.assign_codes([(e.job.id, name) for name, entries in plan.digest.sections.items()
                                         for e in entries])
 
+        # The "Your applications" block. A real run applies the no-response rule
+        # first; a dry run shows what it would close without saving it.
+        activity = followups.gather(store, config.tracking, now, write=write)
+        apps = followups.blocks(activity, config.tracking.follow_up_days) if activity and not activity.empty else None
+
         if not email:
-            render_digest(plan.digest, show_dropped=args.all, today=today, out=out, codes=codes)
+            render_digest(plan.digest, show_dropped=args.all, today=today, out=out, codes=codes, apps=apps)
         _summary(plan, args, err)
         _print_fetch_summary(results, err)
         for label, had in health.went_empty:
             print(f"  NOW EMPTY {label}: had {had} postings last run", file=err)
         if args.html:
-            args.html.write_text(render_html(plan.digest, today, health=health, codes=codes))
+            args.html.write_text(render_html(plan.digest, today, health=health, codes=codes, apps=apps))
             print(f"wrote the email's HTML to {args.html}", file=err)
 
         sent = plan.to_send
@@ -286,9 +301,9 @@ def cmd_run(args: argparse.Namespace, transport: httpx.BaseTransport | None, out
             title = subject(plan.digest, today)
             to = ", ".join(settings.to)
             msg = build_message(settings, title,
-                                render_text(plan.digest, today, health=health, codes=codes,
+                                render_text(plan.digest, today, health=health, codes=codes, apps=apps,
                                             overflow_hint="; they lead the next digest"),
-                                render_html(plan.digest, today, health=health, codes=codes))
+                                render_html(plan.digest, today, health=health, codes=codes, apps=apps))
             try:
                 mailer.send(msg)
                 print(f"emailed \"{title}\" to {to}", file=err)
@@ -296,10 +311,14 @@ def cmd_run(args: argparse.Namespace, transport: httpx.BaseTransport | None, out
                 print(f"EMAIL FAILED: {exc}\nNothing was marked as sent; the next run will include these postings.",
                       file=err)
                 sent, status = [], 1
+                activity = None   # nothing reported: the next digest repeats it
         if write:
             board_log = [(r.board.label, len(r.jobs), r.error) for r in results]
             store.mark_sent(sent, now, board_log)
             print(f"saved {len(jobs)} postings to {args.db} · marked {len(sent)} as sent", file=err)
+            if activity and not activity.empty:
+                followups.record(store, activity, now)
+                print("applications: " + _activity_summary(activity), file=err)
         if config.aggregators.harvest:
             _harvest(jobs, config, args, write=write, err=err)
     finally:

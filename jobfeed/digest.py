@@ -14,6 +14,10 @@ from jobfeed.sources import AGGREGATORS, SOURCE_NAMES
 MAX_LOCATION_CHARS = 70
 MAX_LISTED_PROBLEMS = 15
 APPLY_HINT = "Applied to one? Log it on the Pi with: jobfeed apply CODE"
+APPS_TITLE = "Your applications"
+
+# The "Your applications" block: (heading, lines) per part, from followups.blocks.
+AppBlock = list[tuple[str, list[str]]]
 
 
 # --- pieces of an entry --------------------------------------------------------------
@@ -147,12 +151,18 @@ def build_health(results, plan, previous: dict[str, int]) -> Health:
 
 def render_text(digest: Digest, today: date, *, health: Health | None = None, show_dropped: bool = False,
                 noun: str = "new", overflow_hint: str = " (raise digest.max_per_section or use --limit 0)",
-                codes: dict[str, int] | None = None) -> str:
-    """codes: job id -> digest code, shown before each title (none in a dry run)."""
+                codes: dict[str, int] | None = None, apps: AppBlock | None = None) -> str:
+    """codes: job id -> digest code, shown before each title (none in a dry run).
+    apps: the "Your applications" block, left out when empty."""
     codes = codes or {}
     watch = len(digest.sections[WATCHLIST]) + digest.hidden.get(WATCHLIST, 0)
     label = "Job feed" if noun == "new" else "Job feed replay"
     lines = [f"{label} · {date_label(today)} · {digest.matched} {noun} ({watch} watchlist)"]
+    if apps:
+        lines += ["", f"== {APPS_TITLE}"]
+        for heading, items in apps:
+            lines.append(f"  {heading}")
+            lines += [f"    {item}" for item in items]
     if not digest.matched:
         lines += ["", "Nothing new matched." if noun == "new" else "Nothing matched."]
     elif codes and noun == "new":
@@ -211,8 +221,20 @@ def _entry_html(entry: Entry, code: int | None = None) -> str:
             "</td></tr>")
 
 
+def _apps_html(apps: AppBlock) -> list[str]:
+    out = [f'<div style="{_FONT}background:#f6f8fa;border:1px solid {_RULE};border-radius:6px;'
+           f'padding:10px 14px;margin:0 0 16px">',
+           f'<div style="font-size:15px;font-weight:600;color:{_INK};margin:0 0 4px">{_e(APPS_TITLE)}</div>']
+    for heading, items in apps:
+        out.append(f'<div style="font-size:13px;font-weight:600;color:{_QUIET};margin:8px 0 2px">{_e(heading)}</div>')
+        out += [f'<div style="font-size:14px;line-height:1.45;color:{_INK};margin:1px 0">{_e(item)}</div>'
+                for item in items]
+    out.append("</div>")
+    return out
+
+
 def render_html(digest: Digest, today: date, *, health: Health | None = None,
-                codes: dict[str, int] | None = None) -> str:
+                codes: dict[str, int] | None = None, apps: AppBlock | None = None) -> str:
     codes = codes or {}
     watch = len(digest.sections[WATCHLIST]) + digest.hidden.get(WATCHLIST, 0)
     body: list[str] = [
@@ -221,6 +243,8 @@ def render_html(digest: Digest, today: date, *, health: Health | None = None,
         f'<div style="{_FONT}font-size:14px;color:{_QUIET};margin:0 0 16px">{digest.matched} new'
         f' · {watch} on your watchlist</div>',
     ]
+    if apps:
+        body += _apps_html(apps)
     if not digest.matched:
         body.append(f'<p style="{_FONT}font-size:15px;color:{_INK}">Nothing new matched today.</p>')
     elif codes:

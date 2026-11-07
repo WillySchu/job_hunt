@@ -76,9 +76,10 @@ def test_version_2_database_is_upgraded_in_place(tmp_path):
         assert row.job == job and row.code is None
         assert store.next_code() == FIRST_CODE
     conn = sqlite3.connect(db)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 3
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 4
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert {"applications", "events", "mail_seen"} <= tables
+    assert "reported" in {r[1] for r in conn.execute("PRAGMA table_info(events)")}
 
 
 def test_codes_are_numbered_in_digest_order_and_shown(feed):
@@ -329,10 +330,10 @@ def test_apps_code_shows_the_history(applied):
         "  first seen Nov 6 · applied Nov 8 (2 days later) · logged via code",
         "  Stage: rejected since Nov 11",
         "History",
-        "  2026-11-08  applied                      via cli",
-        "  2026-11-09  screen                       via cli",
-        "  2026-11-09  note: ask about on-call      via cli",
-        "  2026-11-11  rejected (at screen)         via cli",
+        "  2026-11-08  applied                            via cli",
+        "  2026-11-09  screen                             via cli",
+        "  2026-11-09  note: ask about on-call            via cli",
+        "  2026-11-11  rejected (at screen)               via cli",
     ]
     assert _run(["apps", "555", *args])[0] == 1
 

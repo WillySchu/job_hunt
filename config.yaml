@@ -87,3 +87,9 @@ tracking:
   # pass --resume on one application to try a version out.
   resume_version: v1
   cover_letter: false   # true if you usually send one; --cover-letter / --no-cover-letter per application
+  # The digest's "Your applications" block lists an open application to follow
+  # up on once it has been quiet this many days. An application with no reply
+  # this many days after applying is closed as "no response" (`jobfeed mark
+  # CODE reopen` restarts the clock). Later stages are never closed this way.
+  follow_up_days: 10
+  no_response_days: 21

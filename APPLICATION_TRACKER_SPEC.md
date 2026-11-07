@@ -133,6 +133,13 @@ Rates only count applications that have had time to resolve: at least 21 days ol
 
 An application with no response 21 days after applying moves to "no response". Later stages aren't closed automatically, because interview loops often pause for weeks; they get the 10-day follow-up instead. Both thresholds are settings in config.yaml.
 
+How the rules work in detail:
+
+- "Since the last run" means since the last digest that was actually sent: each event is marked reported when an email carrying it goes out, so a failed send leaves everything for the next one.
+- A follow-up is listed once per quiet stretch and kept as a `follow_up` event. Any new entry, a note included, starts a new stretch. An application with news in the same digest waits a day.
+- The no-response closure is dated the day the limit passed, not the day of the run. `jobfeed mark CODE reopen` restarts the clock, and a reply reopens it. `undo` refuses to remove the rule's closure, because the rule would only close it again.
+- A dry run shows what the rule would close without saving it.
+
 **Weekly email.** Sent by the Monday 6:00 run as a separate message:
 
 - this week's applications and the total so far;
@@ -147,7 +154,7 @@ An application with no response 21 days after applying moves to "no response". L
 Three new tables join `jobs` in `jobs.db`, and jobfeed upgrades an existing database on its next run. The events table is the record; an application's current stage is kept alongside it only for quick listing.
 
 ```sql
--- schema 3
+-- schema 3 (schema 4 adds events.reported)
 ALTER TABLE jobs ADD COLUMN code INTEGER;      -- digest number, set when a posting is first emailed
 ALTER TABLE jobs ADD COLUMN section TEXT;      -- the digest section it was emailed in
 CREATE UNIQUE INDEX jobs_code ON jobs(code);
@@ -178,10 +185,11 @@ CREATE TABLE events (
   code        INTEGER NOT NULL REFERENCES applications(code),
   at          TEXT NOT NULL,
   kind        TEXT NOT NULL,   -- applied | reply | screen | interview | offer | accepted | declined
-                               -- | rejected | withdrawn | no_response | reopened | note
+                               -- | rejected | withdrawn | no_response | reopened | note | follow_up
   origin      TEXT NOT NULL,   -- cli | reply | email | rule
   message_id  TEXT,            -- the Gmail message it came from
-  detail      TEXT             -- the stage a rejection came at, or a note's text
+  detail      TEXT,            -- the stage a rejection came at, or a note's text
+  reported    TEXT             -- when a digest first carried it; NULL until then (schema 4)
 );
 CREATE INDEX events_code ON events(code, at);
 
@@ -221,7 +229,7 @@ Each phase changes one thing, so its effect can be read against the applications
 Tracking starts with milestone 1, so the baseline can begin while the rest is built. Milestones 1 and 2 need no inbox access. By milestone 4, a few weeks of real job mail will have arrived to test the rules against.
 
 - [x] **1. Applications and codes.** Schema 3, digest codes (`#412`), and `jobfeed apply`, `mark`, `note`, `apps` and `undo`. Done when you can log today's applications.
-- [ ] **2. Daily follow-ups.** The "Your applications" block in the digest, the 10-day follow-up and the 21-day "no response" rule.
+- [x] **2. Daily follow-ups.** The "Your applications" block in the digest, the 10-day follow-up and the 21-day "no response" rule.
 - [ ] **3. Gmail reader and replies.** Read-only IMAP, `mail_seen`, and digest replies run as commands. Done when a reply to the digest logs an application.
 - [ ] **4. Mail classifier.** Confirmation, rejection, interview, offer and other reply; matching mail to applications; the "Check these" list; and `jobfeed mail --dry-run`, which shows how each recent message would be read without acting on it.
 - [ ] **5. Stats.** `jobfeed stats` with cuts, likely ranges and "too few to tell".

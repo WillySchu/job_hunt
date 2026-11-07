@@ -13,7 +13,7 @@ from urllib.parse import urlsplit, urlunsplit
 from jobfeed.models import Job
 
 DEFAULT_PATH = Path("jobs.db")
-SCHEMA_VERSION = 3  # 2: board_runs; 3: digest codes, applications, events, mail_seen
+SCHEMA_VERSION = 4  # 2: board_runs; 3: digest codes, applications, events, mail_seen; 4: events.reported
 FIRST_CODE = 101   # digest codes start here, so every code has at least three digits
 
 _SCHEMA = """
@@ -73,19 +73,28 @@ CREATE TABLE IF NOT EXISTS mail_seen (
 );
 """
 
-# Columns added to `jobs` after it was first created, and when.
-_JOB_COLUMNS = [
-    ("code", "INTEGER"),     # 3: digest number, set when a posting is first emailed
-    ("section", "TEXT"),     # 3: digest section it was emailed in
-]
+# Columns added to tables after they were first created, and when.
+_ADDED_COLUMNS = {
+    "jobs": [
+        ("code", "INTEGER"),     # 3: digest number, set when a posting is first emailed
+        ("section", "TEXT"),     # 3: digest section it was emailed in
+    ],
+    "events": [
+        ("reported", "TEXT"),    # 4: when a digest first carried it; NULL until then
+    ],
+}
 
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(microsecond=0)
 
 
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
 def _job_columns(conn: sqlite3.Connection) -> set[str]:
-    return {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+    return _columns(conn, "jobs")
 
 
 def _ts(moment: datetime) -> str:
@@ -116,6 +125,7 @@ class Store:
         self.readonly = readonly
         # A read-only open of an older database may lack the newer columns and tables.
         self.has_codes = "code" in _job_columns(conn)
+        self.has_tracker = "reported" in _columns(conn, "events")
 
     # --- opening ------------------------------------------------------------
 
@@ -129,10 +139,11 @@ class Store:
                 conn.close()
                 raise StoreError(f"{path} was written by a newer jobfeed (schema {version}); upgrade jobfeed")
             conn.executescript(_SCHEMA)
-            present = _job_columns(conn)
-            for name, kind in _JOB_COLUMNS:
-                if name not in present:
-                    conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {kind}")
+            for table, added in _ADDED_COLUMNS.items():
+                present = _columns(conn, table)
+                for name, kind in added:
+                    if name not in present:
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS jobs_code ON jobs(code)")
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             conn.commit()
