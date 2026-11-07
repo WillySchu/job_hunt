@@ -126,7 +126,11 @@ Rates only count applications that have had time to resolve: at least 21 days ol
 
 **Cuts.** Any metric can be split by found via, digest section, referral, resume version, cover letter, form filled automatically, fit score band, days to apply (0–1, 2–3, 4–7, 8+), seniority, work mode, or the week applied.
 
-**Small numbers.** The likely range is a 90% interval for each rate. A comparison is marked "too few to tell" when either group has fewer than 15 applications or the ranges overlap heavily.
+**Small numbers.** The likely range is a 90% interval for each rate (a Wilson interval, which stays sensible at small counts and at 0% or 100%). A comparison is marked "too few to tell" when either group has fewer than 15 applications or the ranges overlap heavily, meaning either group's rate falls inside the other's range. Each split compares its highest and lowest group on one metric, replies by default.
+
+**What counts as what.** A reply is any answer from the company, rejections included; a confirmation email and the no-reply rule's closure are not. Reaching a stage includes applications rejected or withdrawn after it. Days to first reply runs from applying to the first answer. Fit score bands are high (0.7+), medium (0.4+) and low, and unscored until the scorer exists.
+
+**On demand.** `jobfeed stats` prints the overall rates and every split with data in at least two groups; `--by CUT` picks splits, `--metric` sets what the verdicts compare, and `--since` limits it to recent applications.
 
 **Daily digest.** A short "Your applications" block at the top, left out when empty:
 
@@ -250,7 +254,7 @@ Tracking starts with milestone 1, so the baseline can begin while the rest is bu
 - [x] **2. Daily follow-ups.** The "Your applications" block in the digest, the 10-day follow-up and the 21-day "no response" rule.
 - [x] **3. Gmail reader and replies.** Read-only IMAP, `mail_seen`, and digest replies run as commands. Done when a reply to the digest logs an application.
 - [x] **4. Mail classifier.** Confirmation, rejection, interview, offer and other reply; matching mail to applications; the "Check these" list; and `jobfeed mail --dry-run`, which shows how each recent message would be read without acting on it.
-- [ ] **5. Stats.** `jobfeed stats` with cuts, likely ranges and "too few to tell".
+- [x] **5. Stats.** `jobfeed stats` with cuts, likely ranges and "too few to tell".
 - [ ] **6. Weekly email and backups.** The Monday report, and the weekly copy of `jobs.db`.
 - [ ] **7. Two weeks of checking.** Compare the tracker's stages with your inbox, and add rules for any mail it misread.
 - [ ] **8. Follow-up: LinkedIn confirmations.** Read LinkedIn's "your application was sent" emails as confirmations, so Easy Apply applications are logged too.

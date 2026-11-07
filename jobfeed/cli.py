@@ -1,5 +1,5 @@
 """Command-line entry point: `jobfeed run`, `replay`, `discover`, `send-test`, and the tracker commands
-(`apply`, `mark`, `note`, `apps`, `undo`, `edit`, `mail`)."""
+(`apply`, `mark`, `note`, `apps`, `undo`, `edit`, `mail`, `stats`)."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from jobfeed.mailer import DEFAULT_ENV, GmailMailer, MailConfigError, Mailer, Se
 from jobfeed.sources import SOURCE_NAMES, SOURCES, Board, FetchResult, fetch_all
 from jobfeed.store import DEFAULT_PATH as DB_PATH
 from jobfeed.store import Store, StoreError, utc_now
-from jobfeed import followups, mailbox, tracker
+from jobfeed import followups, mailbox, stats, tracker
 from jobfeed.imap import GmailReader, ReadError
 from jobfeed.tracker import TrackerError
 
@@ -152,6 +152,18 @@ def _tracker_parsers(sub) -> None:
     edit.add_argument("--cover-letter", action=argparse.BooleanOptionalAction, default=None)
     edit.add_argument("--referral", action=argparse.BooleanOptionalAction, default=None)
     edit.add_argument("--via", choices=tracker.VIA_CHOICES, help="where you found a role jobfeed never saw")
+
+    st = sub.add_parser("stats", parents=[db], help="reply, screen, interview and offer rates, and what changes them",
+                        description="Rates from your applications, each with a likely range, split by what might "
+                                    "change them. Rates count applications at least tracking.no_response_days old, "
+                                    "or closed.")
+    st.add_argument("--by", action="append", choices=[*stats.CUT_KEYS, "all"], metavar="CUT",
+                    help=f"show this split even with one group; repeatable ({', '.join(stats.CUT_KEYS)}, or all). "
+                         "Default: every split with at least two groups")
+    st.add_argument("--metric", choices=[k for k, _, _ in stats.METRICS], default="replied",
+                    help="the rate each split's verdict compares (default replied)")
+    st.add_argument("--since", metavar="YYYY-MM-DD", help="only applications from this day on")
+    st.add_argument("--config", type=Path, default=CONFIG_PATH, help="path to config.yaml")
 
     mail = sub.add_parser("mail", parents=[db], help="read replies to the digest and job mail from Gmail now",
                           description="Read new replies to the digest, and job mail (confirmations, rejections, "
@@ -789,6 +801,28 @@ def cmd_edit(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     return 0
 
 
+def cmd_stats(args: argparse.Namespace, out: TextIO, err: TextIO, now: datetime) -> int:
+    config = _load_config(args.config, err)
+    if config is None:
+        return 2
+    since = None
+    if args.since:
+        try:
+            since = tracker.parse_day(args.since, now)
+        except TrackerError as exc:
+            print(f"--since: {exc}", file=err)
+            return 2
+        since = datetime.combine(since.astimezone().date(), datetime.min.time()).astimezone()
+    store = _open_store(args.db, err)
+    if store is None:
+        return 2
+    with store:
+        facts = stats.gather(store, now, config.tracking, since=since)
+    cuts = None if not args.by else (stats.CUT_KEYS if "all" in args.by else args.by)
+    print("\n".join(stats.report(facts, config.tracking, cuts=cuts, metric=args.metric, now=now)), file=out)
+    return 0
+
+
 def cmd_undo(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     store = _open_store(args.db, err)
     if store is None:
@@ -837,6 +871,8 @@ def main(
         return cmd_undo(args, out, err)
     if args.command == "edit":
         return cmd_edit(args, out, err)
+    if args.command == "stats":
+        return cmd_stats(args, out, err, now)
     if args.command == "mail":
         return cmd_mail(args, out, err, now, imap_factory)
     return cmd_discover(args, transport, out, err)

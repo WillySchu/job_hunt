@@ -23,8 +23,9 @@ Application tracker:
 | 2. Daily follow-ups | **Done** — "Your applications" in the digest, 10-day follow-ups, 21-day no-response rule |
 | 3. Gmail reader and replies | **Done** — read-only IMAP; reply to the digest with commands; `jobfeed mail` |
 | 4. Mail classifier | **Done** — confirmations, rejections, interview requests and offers read from Gmail; "Check these"; `jobfeed edit` |
-| 5. Stats | Next |
-| 6–8 | Weekly email and backups, checking, LinkedIn confirmations |
+| 5. Stats | **Done** — `jobfeed stats`: rates with likely ranges, split by resume, source and more |
+| 6. Weekly email and backups | Next |
+| 7–8 | Checking, LinkedIn confirmations |
 
 ## Setup
 
@@ -316,6 +317,36 @@ The dry run prints each job email with what it was read as and the phrase that d
 
 If Gmail can't be read, the digest still goes out, and its footer says why; the next run catches up.
 
+#### Stats
+
+```sh
+.venv/bin/jobfeed stats                         # overall rates, then every split with at least two groups
+.venv/bin/jobfeed stats --by resume             # just one split (repeatable; --by all for every one)
+.venv/bin/jobfeed stats --metric screen         # what each split's verdict compares (replied, screen, interview, offer)
+.venv/bin/jobfeed stats --since 2026-11-01      # only applications from that day on
+```
+
+```
+Applications: 52 · 44 open · 30 counted in rates (at least 21 days old, or closed)
+  Replied               16 of 30 (53%, likely 39–67%)
+  Screen or further     10 of 30 (33%, likely 21–48%)
+  Interview or further  3 of 30 (10%, likely 4–23%)
+  Offer or further      0 of 30 (0%, likely 0–8%)
+  Days to first reply   median 5.5 (from 18 replies)
+
+Resume version
+      apps  counted  Replied               Screen                Interview
+  v1    26       14  3/14 21% (9–43%)      3/14 21% (9–43%)      1/14 7% (2–27%)
+  v2    26       16  13/16 81% (61–92%)    7/16 44% (26–64%)     2/16 13% (4–32%)
+  → too few to tell: v1 has 14 counted; 15 each are needed
+```
+
+- **Replied** counts any answer from the company, rejections included; a confirmation email or the no-reply rule doesn't count. **Screen or further** and the rest count applications that reached that stage, including ones rejected after it.
+- **Counted** applications are at least `tracking.no_response_days` (21) old, or closed, so new applications that haven't had time to hear back don't drag the rates down.
+- Each rate has a likely range (a 90% interval). At these numbers a bare percentage misleads; the range is what to read.
+- Each split compares its highest and lowest group, and says **too few to tell** when either has fewer than 15 counted, or when either rate falls inside the other's range. Only otherwise does it name a winner. The example above is the point: 21% against 81% looks decisive, but 14 applications can't say so yet.
+- The splits: found via, digest section, referral, resume version, cover letter, form filled automatically, fit score, days from posting to applying, seniority, work mode, and week applied. Fit score and form filling read "unscored" and "unknown" until those tools exist.
+
 ## Deploy on the Pi
 
 jobfeed runs as a systemd service, started every morning at 6:00 Seattle time by a timer. It needs Python 3.11 or newer, which Raspberry Pi OS Bookworm has.
@@ -371,6 +402,7 @@ jobfeed/
   imap.py           # read-only Gmail IMAP client (X-GM-RAW search, BODY.PEEK)
   classify.py       # what a job email means: confirmation, rejection, interview, offer, reply
   jobmail.py        # tying job mail to an application and recording it
+  stats.py          # rates, likely ranges, splits and verdicts for `jobfeed stats`
   dedupe.py         # what a run sends: skip sent, one copy per role, 30-day window
   digest.py         # subject, text and HTML bodies, run-health footer
   mailer.py         # .env settings; Gmail SMTP with STARTTLS and retries
