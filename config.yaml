@@ -102,3 +102,11 @@ tracking:
   # company's confirmations come from a system not listed (`jobfeed mail
   # --dry-run` shows what was read).
   ats_senders: [greenhouse-mail.io, greenhouse.io, lever.co, ashbyhq.com]
+  # The run on weekly_day also emails a weekly report (what `jobfeed stats`
+  # shows, plus last week's applications and news) and copies jobs.db to
+  # backups/, keeping the newest backups_kept copies (0 turns backups off).
+  # jobs.db now holds application history that can't be fetched again, so
+  # copy backups/ off the Pi now and then.
+  weekly_report: true
+  weekly_day: monday
+  backups_kept: 8

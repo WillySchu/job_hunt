@@ -29,6 +29,8 @@ from jobfeed.tracker import OPEN_STAGES, Application
 
 Z90 = 1.6448536269514722     # two-sided 90%
 MIN_GROUP = 15
+RECENT_DAYS = 28             # the funnel's "last 4 weeks"
+QUIET_LISTED = 5             # open applications listed as longest without news
 
 RESPONSES = {"reply", "screen", "interview", "offer", "accepted", "declined", "rejected"}
 REACHED = {"screen": 1, "interview": 2, "offer": 3, "accepted": 3, "declined": 3}
@@ -200,6 +202,8 @@ def split(facts: list[Facts], cut: Cut) -> list[tuple[str, Summary]]:
 def verdict(groups: list[tuple[str, Summary]], metric: str) -> str:
     """Compare the groups with the highest and lowest rate."""
     rated = [(g, s.rates[metric]) for g, s in groups if s.rates[metric].n]
+    if not rated:
+        return "too few to tell: none is old enough to count yet"
     if len(rated) < 2:
         return "too few to tell: only one group has applications old enough to count"
     hi_g, hi = max(rated, key=lambda x: (x[1].p, x[1].n))
@@ -248,26 +252,71 @@ def cut_lines(cut: Cut, groups: list[tuple[str, Summary]], metric: str) -> list[
     return lines
 
 
+def funnel_lines(facts: list[Facts], now: datetime) -> list[str]:
+    """Every application so far, stage by stage, each with its share of the stage before."""
+    recent = [f for f in facts if now - f.app.applied_at <= timedelta(days=RECENT_DAYS)]
+
+    def column(group: list[Facts]) -> list[int]:
+        return [len(group), sum(f.replied for f in group)] + [sum(f.reached >= lvl for f in group)
+                                                               for _, _, lvl in METRICS[1:]]
+
+    def cell(counts: list[int], i: int) -> str:
+        share = f"{pct(counts[i] / counts[i - 1]):>3}%" if i and counts[i - 1] else "    "
+        return f"{counts[i]:>4} {share}"
+
+    labels = ["Applied", "Replied"] + [f"{label} or further" for _, label, _ in METRICS[1:]]
+    everything, last4 = column(facts), column(recent)
+    lines = [f"{'Funnel':<24}{'all time':<15}last 4 weeks"]
+    for i, label in enumerate(labels):
+        lines.append(f"  {label:<22}{cell(everything, i)}   {'':>3}{cell(last4, i)}".rstrip())
+    lines.append("  (each % is of the row above; the last 4 weeks include applications too new to have heard)")
+    return lines
+
+
+def quiet_lines(facts: list[Facts], now: datetime) -> list[str]:
+    from jobfeed.followups import FollowUp, follow_up_line
+    open_ = []
+    for f in facts:
+        if not f.open:
+            continue
+        since = max(e.at for e in f.app.events if e.kind != "follow_up")
+        open_.append(FollowUp(f.app, since, (now - since).days))
+    if not open_:
+        return []
+    open_.sort(key=lambda x: x.quiet_since)
+    return ["Longest without news"] + [f"  {follow_up_line(x)}" for x in open_[:QUIET_LISTED]]
+
+
 def report(facts: list[Facts], rules: TrackingRules, *, cuts: list[str] | None = None, metric: str = "replied",
            now: datetime | None = None) -> list[str]:
-    """The whole `jobfeed stats` output. cuts: keys to show; None = every cut with at least two groups."""
+    """The whole `jobfeed stats` output, which the weekly email carries too.
+    cuts: keys to show; None = every cut with at least two groups."""
     if not facts:
         return ["No applications yet. Log one with `jobfeed apply CODE`, or reply `applied CODE` to the digest."]
     first_counts = None
     if now is not None:
         first = min(f.app.applied_at for f in facts)
         first_counts = (first + timedelta(days=rules.no_response_days)).astimezone().date()
-    lines = overview(summarize(facts), rules, first_counts)
+    summary = summarize(facts)
+    lines = overview(summary, rules, first_counts)
+    if now is not None:
+        lines += [""] + funnel_lines(facts, now)
     for cut in CUTS:
         if cuts is not None and cut.key not in cuts:
             continue
+        if cuts is None and not summary.counted:
+            continue      # every table would be empty; --by still shows one
         groups = split(facts, cut)
         if cuts is None and len(groups) < 2:
             continue
         lines += [""] + cut_lines(cut, groups, metric)
-    if cuts is None:
+    if cuts is None and summary.counted:
         shown = sum(1 for c in CUTS if len(split(facts, c)) >= 2)
         if not shown:
             lines += ["", "No splits yet: every application so far has the same resume, source, and so on. "
                           "`--by resume` (or another cut) shows one anyway."]
+    if now is not None and cuts is None:
+        quiet = quiet_lines(facts, now)
+        if quiet:
+            lines += [""] + quiet
     return lines

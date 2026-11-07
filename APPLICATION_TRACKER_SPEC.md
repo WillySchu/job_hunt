@@ -155,7 +155,9 @@ How the rules work in detail:
 - every cut that has data in at least two groups, with counts and ranges;
 - open applications that have gone longest without news.
 
-**On the command line.** `jobfeed stats` prints the same report at any time. `--by resume_version` shows one cut, and `--since 2026-11-15` limits it to applications from that date.
+**On the command line.** `jobfeed stats` prints the same report at any time. `--by resume` shows one cut, and `--since 2026-11-15` limits it to applications from that date. `jobfeed weekly` emails the report now, covering the last 7 days.
+
+**When it goes out.** The weekly email follows the digest on the run on `tracking.weekly_day`, and covers the seven days before that day. The first goes out on the first such day after installing; after that a missed run or a failed send is made up by the next run. A failed report never fails the run, since a retried run would send the digest twice, and no report goes out when the digest itself couldn't be sent.
 
 ## Data model
 
@@ -225,7 +227,7 @@ CREATE TABLE mail_seen (
 
 Pay, work mode and seniority aren't copied: stats read them from `jobs` through `job_id`, so manually logged roles simply have none.
 
-**Backups.** Until now `jobs.db` held postings that could be fetched again; application history can't be. The Monday run copies the database to `backups/jobs-YYYY-MM-DD.db` and keeps the last 8. Copying `backups/` off the Pi now and then guards against a failed SD card.
+**Backups.** Until now `jobs.db` held postings that could be fetched again; application history can't be. The Monday run copies the database to `backups/jobs-YYYY-MM-DD.db` and keeps the last 8 (`tracking.backups_kept`). The copy uses SQLite's backup API, so it's consistent even mid-write, and the first one is made by the first run after installing. `jobfeed backup` makes one on demand. Copying `backups/` off the Pi now and then guards against a failed SD card.
 
 ## Experiment plan
 
@@ -255,7 +257,7 @@ Tracking starts with milestone 1, so the baseline can begin while the rest is bu
 - [x] **3. Gmail reader and replies.** Read-only IMAP, `mail_seen`, and digest replies run as commands. Done when a reply to the digest logs an application.
 - [x] **4. Mail classifier.** Confirmation, rejection, interview, offer and other reply; matching mail to applications; the "Check these" list; and `jobfeed mail --dry-run`, which shows how each recent message would be read without acting on it.
 - [x] **5. Stats.** `jobfeed stats` with cuts, likely ranges and "too few to tell".
-- [ ] **6. Weekly email and backups.** The Monday report, and the weekly copy of `jobs.db`.
+- [x] **6. Weekly email and backups.** The Monday report, and the weekly copy of `jobs.db`.
 - [ ] **7. Two weeks of checking.** Compare the tracker's stages with your inbox, and add rules for any mail it misread.
 - [ ] **8. Follow-up: LinkedIn confirmations.** Read LinkedIn's "your application was sent" emails as confirmations, so Easy Apply applications are logged too.
 

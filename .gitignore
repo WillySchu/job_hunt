@@ -10,5 +10,6 @@ dist/
 # jobfeed runtime state and secrets
 .env
 jobs.db
+backups/
 logs/
 companies.yaml.bak

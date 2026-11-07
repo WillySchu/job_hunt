@@ -1,10 +1,11 @@
 """Command-line entry point: `jobfeed run`, `replay`, `discover`, `send-test`, and the tracker commands
-(`apply`, `mark`, `note`, `apps`, `undo`, `edit`, `mail`, `stats`)."""
+(`apply`, `mark`, `note`, `apps`, `undo`, `edit`, `mail`, `stats`, `weekly`, `backup`)."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -28,7 +29,7 @@ from jobfeed.mailer import DEFAULT_ENV, GmailMailer, MailConfigError, Mailer, Se
 from jobfeed.sources import SOURCE_NAMES, SOURCES, Board, FetchResult, fetch_all
 from jobfeed.store import DEFAULT_PATH as DB_PATH
 from jobfeed.store import Store, StoreError, utc_now
-from jobfeed import followups, mailbox, stats, tracker
+from jobfeed import followups, mailbox, stats, tracker, weekly
 from jobfeed.imap import GmailReader, ReadError
 from jobfeed.tracker import TrackerError
 
@@ -165,6 +166,16 @@ def _tracker_parsers(sub) -> None:
     st.add_argument("--since", metavar="YYYY-MM-DD", help="only applications from this day on")
     st.add_argument("--config", type=Path, default=CONFIG_PATH, help="path to config.yaml")
 
+    wk = sub.add_parser("weekly", parents=[db], help="send the weekly report now (it also goes out on its own)",
+                        description="Email the weekly report now, covering the last 7 days. The Monday report "
+                                    "still goes out as usual.")
+    wk.add_argument("--no-email", action="store_true", help="print it instead")
+    wk.add_argument("--env", type=Path, default=DEFAULT_ENV, help="file with the Gmail settings (default .env)")
+    wk.add_argument("--config", type=Path, default=CONFIG_PATH, help="path to config.yaml")
+
+    bk = sub.add_parser("backup", parents=[db], help="copy jobs.db into backups/ now")
+    bk.add_argument("--config", type=Path, default=CONFIG_PATH, help="path to config.yaml")
+
     mail = sub.add_parser("mail", parents=[db], help="read replies to the digest and job mail from Gmail now",
                           description="Read new replies to the digest, and job mail (confirmations, rejections, "
                                       "interview requests, offers), from Gmail and act on them, as `jobfeed run` "
@@ -234,6 +245,32 @@ def _summary(plan: Plan, args: argparse.Namespace, err: TextIO, noun: str = "new
         parts.append(f"{len(plan.already_sent)} already sent")
     parts.append(_drop_summary(digest) + ("" if args.all or not digest.dropped else " (add --all to see why)"))
     print(" · ".join(parts), file=err)
+
+
+def _backup(store: Store, db: Path, now: datetime, keep: int) -> str:
+    try:
+        dest = weekly.backup(store, db, now, keep)
+    except (OSError, sqlite3.Error) as exc:
+        return f"Backup of {db} failed: {exc}. The next run tries again."
+    return f"Backed up {db} to {dest}" + (f" (keeping the newest {keep})." if keep else ".")
+
+
+def _send_weekly(store: Store, day: date, config: Config, now: datetime, mailer: Mailer | None, settings,
+                 out: TextIO, err: TextIO, *, record: bool = True) -> bool:
+    """Email the weekly report (or print it, with no mailer). Never raises; False if it couldn't be sent."""
+    report = weekly.render(stats.gather(store, now, config.tracking), config.tracking, now, day)
+    if mailer is None:
+        print("\n" + report.text, file=out)
+    else:
+        try:
+            mailer.send(build_message(settings, report.subject, report.text, report.html))
+        except SendError as exc:
+            print(f"weekly report not sent: {exc}. The next run tries again.", file=err)
+            return False
+        print(f"emailed \"{report.subject}\" to {', '.join(settings.to)}", file=err)
+    if record:
+        weekly.mark_sent(store, day)
+    return True
 
 
 def _activity_summary(activity: followups.Activity) -> str:
@@ -320,6 +357,11 @@ def cmd_run(args: argparse.Namespace, transport: httpx.BaseTransport | None, out
         previous = store.previous_counts(r.board.label for r in results) if store else {}
         health = build_health(results, plan, previous)
 
+        # The weekly copy of jobs.db, before this run changes anything.
+        if write and weekly.backup_due(store, now, config.tracking):
+            health.backup_note = _backup(store, args.db, now, config.tracking.backups_kept)
+            print(health.backup_note, file=err)
+
         # Save postings first, so the ones in this digest can get their codes
         # before it's rendered. A dry run writes nothing and shows no codes.
         codes: dict[str, int] = {}
@@ -372,6 +414,10 @@ def cmd_run(args: argparse.Namespace, transport: httpx.BaseTransport | None, out
             if activity and not activity.empty:
                 followups.record(store, activity, now)
                 print("applications: " + _activity_summary(activity), file=err)
+            # The weekly report, after the digest; never when the digest itself couldn't be sent.
+            day = weekly.report_due(store, now, config.tracking)
+            if day is not None and status == 0:
+                _send_weekly(store, day, config, now, mailer if email else None, settings, out, err)
         if config.aggregators.harvest:
             _harvest(jobs, config, args, write=write, err=err)
     finally:
@@ -823,6 +869,45 @@ def cmd_stats(args: argparse.Namespace, out: TextIO, err: TextIO, now: datetime)
     return 0
 
 
+def cmd_weekly(args: argparse.Namespace, out: TextIO, err: TextIO, now: datetime, mailer: Mailer | None) -> int:
+    config = _load_config(args.config, err)
+    if config is None:
+        return 2
+    settings = None
+    if not args.no_email:
+        try:
+            settings = load_settings(args.env)
+        except (MailConfigError, OSError) as exc:
+            print(f"email settings: {exc}.\nUse --no-email to print the report instead.", file=err)
+            return 2
+        mailer = mailer or GmailMailer(settings)
+    store = _open_store(args.db, err)
+    if store is None:
+        return 2
+    with store:
+        # The 7 days up to and including today; the regular report isn't affected.
+        day = now.astimezone().date() + timedelta(days=1)
+        ok = _send_weekly(store, day, config, now, None if args.no_email else mailer, settings, out, err,
+                          record=False)
+    return 0 if ok else 1
+
+
+def cmd_backup(args: argparse.Namespace, out: TextIO, err: TextIO, now: datetime) -> int:
+    config = _load_config(args.config, err)
+    if config is None:
+        return 2
+    if not args.db.exists():
+        print(f"{args.db} doesn't exist yet; nothing to back up", file=err)
+        return 1
+    store = _open_store(args.db, err)
+    if store is None:
+        return 2
+    with store:
+        note = _backup(store, args.db, now, config.tracking.backups_kept)
+    print(note, file=out)
+    return 1 if "failed" in note else 0
+
+
 def cmd_undo(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     store = _open_store(args.db, err)
     if store is None:
@@ -873,6 +958,10 @@ def main(
         return cmd_edit(args, out, err)
     if args.command == "stats":
         return cmd_stats(args, out, err, now)
+    if args.command == "weekly":
+        return cmd_weekly(args, out, err, now, mailer)
+    if args.command == "backup":
+        return cmd_backup(args, out, err, now)
     if args.command == "mail":
         return cmd_mail(args, out, err, now, imap_factory)
     return cmd_discover(args, transport, out, err)

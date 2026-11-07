@@ -204,7 +204,7 @@ def follow_up_line(f: FollowUp) -> str:
     shown = app.applied_at if app.stage == "applied" else app.stage_at
     if local_day(f.quiet_since) != local_day(shown):
         where += f" · last entry {local_day(f.quiet_since)}"
-    return f"{role(app)} · {where} · quiet {f.days} days"
+    return f"{role(app)} · {where} · quiet {f.days} day{'' if f.days == 1 else 's'}"
 
 
 def blocks(activity: Activity, follow_up_days: int) -> list[tuple[str, list[str]]]:

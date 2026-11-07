@@ -153,7 +153,7 @@ def test_stats_report(search):
 
 def test_stats_by_and_metric_and_since(search):
     _, out, _ = _run(["stats", "--by", "resume", "--by", "referral", "--metric", "screen", "--db", str(search)], NOV10)
-    assert [l for l in out.splitlines() if l and not l.startswith(" ") and not l.startswith("Applications")] == [
+    assert [l for l in out.splitlines() if l and not l.startswith((" ", "Applications", "Funnel"))] == [
         "Referral", "Resume version"]
     _, out, _ = _run(["stats", "--by", "all", "--db", str(search)])
     assert all(c.label in out for c in CUTS)
@@ -182,3 +182,11 @@ def test_stats_with_volume_can_tell(tmp_path):
 def test_stats_with_nothing(tmp_path):
     _, out, _ = _run(["stats", "--db", str(tmp_path / "jobs.db")])
     assert out.startswith("No applications yet.")
+
+
+def test_nothing_counted_yet_shows_no_empty_splits_unless_asked(search):
+    early = datetime(2026, 10, 15, 19, 0, tzinfo=timezone.utc)
+    _, out, _ = _run(["stats", "--db", str(search)], early)
+    assert "Resume version" not in out and "Funnel" in out and "Longest without news" in out
+    _, out, _ = _run(["stats", "--by", "resume", "--db", str(search)], early)
+    assert "  → too few to tell: none is old enough to count yet" in out

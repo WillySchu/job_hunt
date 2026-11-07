@@ -87,6 +87,9 @@ class TrackingRules:
     ats_senders: list[str] = field(default_factory=lambda: [
         "greenhouse-mail.io", "greenhouse.io", "lever.co", "ashbyhq.com",
     ])                             # domains applicant-tracking systems send candidate mail from
+    weekly_report: bool = True     # email `jobfeed stats` as a weekly report, on weekly_day
+    weekly_day: str = "monday"
+    backups_kept: int = 8          # weekly copies of jobs.db kept in backups/; 0 turns backups off
 
 
 @dataclass
@@ -173,6 +176,11 @@ def _validate(cfg: Config) -> None:
     cfg.tracking.resume_version = cfg.tracking.resume_version.strip()
     if not cfg.tracking.resume_version:
         raise ConfigError("`tracking.resume_version` is empty; name the resume you send, e.g. v1")
+    cfg.tracking.weekly_day = cfg.tracking.weekly_day.strip().lower()
+    if cfg.tracking.weekly_day not in ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"):
+        raise ConfigError(f"`tracking.weekly_day` must be a day of the week (got {cfg.tracking.weekly_day!r})")
+    if cfg.tracking.backups_kept < 0:
+        raise ConfigError("`tracking.backups_kept` can't be negative; 0 turns backups off")
     if cfg.tracking.follow_up_days < 1 or cfg.tracking.no_response_days < 1:
         raise ConfigError("`tracking.follow_up_days` and `tracking.no_response_days` must be at least 1")
 

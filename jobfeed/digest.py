@@ -108,6 +108,7 @@ class Health:
     aggregators_used: list[str] = field(default_factory=list)
     send_note: str | None = None
     mail_note: str | None = None      # what reading Gmail found, or why it couldn't
+    backup_note: str | None = None    # the weekly copy of jobs.db
 
     @property
     def postings(self) -> int:
@@ -146,6 +147,8 @@ class Health:
             out.append(f"Remote listings via {listed}.")
         if self.mail_note:
             out.append(self.mail_note)
+        if self.backup_note:
+            out.append(self.backup_note)
         if self.send_note:
             out.append(self.send_note)
         return out

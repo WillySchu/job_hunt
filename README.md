@@ -24,8 +24,9 @@ Application tracker:
 | 3. Gmail reader and replies | **Done** — read-only IMAP; reply to the digest with commands; `jobfeed mail` |
 | 4. Mail classifier | **Done** — confirmations, rejections, interview requests and offers read from Gmail; "Check these"; `jobfeed edit` |
 | 5. Stats | **Done** — `jobfeed stats`: rates with likely ranges, split by resume, source and more |
-| 6. Weekly email and backups | Next |
-| 7–8 | Checking, LinkedIn confirmations |
+| 6. Weekly email and backups | **Done** — Monday report email; weekly copies of `jobs.db` in `backups/` |
+| 7. Two weeks of checking | Next: compare what the tracker recorded with your inbox |
+| 8. LinkedIn confirmations | After that |
 
 ## Setup
 
@@ -345,7 +346,28 @@ Resume version
 - **Counted** applications are at least `tracking.no_response_days` (21) old, or closed, so new applications that haven't had time to hear back don't drag the rates down.
 - Each rate has a likely range (a 90% interval). At these numbers a bare percentage misleads; the range is what to read.
 - Each split compares its highest and lowest group, and says **too few to tell** when either has fewer than 15 counted, or when either rate falls inside the other's range. Only otherwise does it name a winner. The example above is the point: 21% against 81% looks decisive, but 14 applications can't say so yet.
-- The splits: found via, digest section, referral, resume version, cover letter, form filled automatically, fit score, days from posting to applying, seniority, work mode, and week applied. Fit score and form filling read "unscored" and "unknown" until those tools exist.
+- The splits: found via, digest section, referral, resume version, cover letter, form filled automatically, fit score, days from posting to applying, seniority, work mode, and week applied. Fit score and form filling read "unscored" and "unknown" until those tools exist. Until something is old enough to count, the splits are left out (`--by` still shows one).
+- After the rates come the **funnel**, every application so far stage by stage for all time and the last 4 weeks, and the open applications that have gone **longest without news**.
+
+#### The weekly report
+
+The run on Monday (`tracking.weekly_day`) also emails the report above as a separate message, after the digest: "Job search weekly · Nov 2–8 · 5 applied (34 so far)". It opens with last week's applications and the news from companies (replies, screens, rejections and so on), then the rates, funnel, splits and quiet applications.
+
+- The first one goes out on the first Monday after you install this. If a Monday run is missed or the report can't be sent, the next run sends it.
+- A report that can't be sent never fails the run: the digest has already gone, and a failed run is retried, which would send the digest again. It's never sent when the digest itself couldn't be.
+- `jobfeed weekly` sends one now, covering the last 7 days (`--no-email` prints it); Monday's still goes out. `tracking.weekly_report: false` turns it off.
+
+#### Backups
+
+`jobs.db` now holds application history that can't be fetched again. Once a week, on the same run, jobfeed copies it to `backups/jobs-YYYY-MM-DD.db` beside it, keeping the newest 8 (`tracking.backups_kept`; 0 turns this off). The first copy is made by the first run after you install this, and the digest's footer says when one was made. The copy is taken with SQLite's own backup, so it's consistent even if something is writing at the time. `jobfeed backup` makes one now.
+
+A copy on the same SD card doesn't survive the card failing, so copy `backups/` off the Pi now and then, for example from your laptop:
+
+```sh
+scp 'pi@raspberrypi.local:job_hunt/backups/*.db' ~/jobfeed-backups/
+```
+
+To restore, stop the timer (`sudo systemctl stop jobfeed.timer`), copy a backup over `jobs.db`, and start it again.
 
 ## Deploy on the Pi
 
@@ -402,7 +424,8 @@ jobfeed/
   imap.py           # read-only Gmail IMAP client (X-GM-RAW search, BODY.PEEK)
   classify.py       # what a job email means: confirmation, rejection, interview, offer, reply
   jobmail.py        # tying job mail to an application and recording it
-  stats.py          # rates, likely ranges, splits and verdicts for `jobfeed stats`
+  stats.py          # rates, likely ranges, splits, funnel and verdicts for `jobfeed stats`
+  weekly.py         # the Monday report email and the weekly backups of jobs.db
   dedupe.py         # what a run sends: skip sent, one copy per role, 30-day window
   digest.py         # subject, text and HTML bodies, run-health footer
   mailer.py         # .env settings; Gmail SMTP with STARTTLS and retries
