@@ -14,7 +14,8 @@ from jobfeed.store import Store
 from tests.conftest import router
 from tests.fake_gmail import ME, FakeGmail, reply
 from tests.job_mail_samples import (ashby_offer, ats_unknown, duckduckgo_confirmation, greenhouse_confirmation,
-                                    greenhouse_rejection, job_mail, newsletter, recruiter_invite)
+                                    greenhouse_rejection, job_mail, newsletter, recruiter_invite,
+                                    upstart_confirmation)
 
 NOW = datetime(2026, 11, 6, 19, 0, tzinfo=timezone.utc)   # Fri Nov 6, 11am in Seattle
 INBOX = ("\\Inbox",)
@@ -283,6 +284,23 @@ def test_duckduckgo_confirmation_reads_as_a_confirmation_and_nothing_else():
     assert reading.kind == "confirmation" and reading.why == "Confirmation of your application"
     # "we'll set up a time to chat" isn't an invitation, and "if we don't see a fit" isn't a rejection
     assert reading.kinds == ["confirmation"]
+
+
+def test_upstart_confirmation_is_not_a_rejection():
+    """It says it will only reach out to "candidates whose skills and experience align": a plan, not a no."""
+    reading = _read(upstart_confirmation(NOW))
+    assert reading.kind == "confirmation" and reading.why == "Thank you for applying"
+    assert reading.kinds == ["confirmation"]
+
+
+@pytest.mark.parametrize("body", [
+    "We've decided to move forward with other candidates whose experience more closely matches the role.",
+    "After careful consideration, we are moving forward with candidates whose skills better align with our needs.",
+    "We have chosen to pursue candidates whose background is a closer fit.",
+    "The team has selected candidates whose qualifications more closely match this position.",
+])
+def test_candidates_whose_after_a_decision_is_still_a_rejection(body):
+    assert _read(job_mail("Acme <no-reply@hire.lever.co>", "Your application", body, sent=NOW)).kind == "rejection"
 
 
 def test_duckduckgo_confirmation_finds_the_application_by_name_and_fixes_its_date(pi):

@@ -41,7 +41,11 @@ REJECTION = _P(
     r"\b(have|has) not been selected\b",
     r"\bregret to inform\b",
     r"\bunable to offer you\b",
-    r"\b(candidates|applicants) whose (skills|experience|background|qualifications)\b",
+    # "candidates whose skills..." is a rejection only after a decision: "we'll only reach out to candidates whose
+    # skills align" is how some confirmations (Upstart's) explain what happens next.
+    r"\b(move|moving|proceed|proceeding|go|going|continue|continuing) forward with (other |a few |the )?"
+    r"(candidates|applicants) whose\b",
+    r"\b(pursue|pursuing|selected|chosen|chose|focus on|focusing on) (other |a few )?(candidates|applicants) whose\b",
     r"\bnot (to )?(advance|progress) your (application|candidacy)\b",
 )
 INTERVIEW = _P(

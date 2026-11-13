@@ -69,6 +69,20 @@ def ashby_offer(sent, company="Orbit"):
                     "attached.\n", sent=sent, reply_to="talent@orbit.dev")
 
 
+def upstart_confirmation(sent):
+    """The real one (Nov 12, 2026), which an earlier rule read as a rejection."""
+    return job_mail(
+        "Upstart Recruiting <no-reply@upstart.com>", "Thank you for applying",
+        "Hi Will,\n\nThanks for applying to the Senior Software Engineer, Identity role at Upstart! We're excited "
+        "about your interest in our mission to enable effortless credit based on true risk.\n\nWe receive a high "
+        "volume of applications, and while our recruiting team carefully reviews each one, we're only able to reach "
+        "out to candidates whose skills and experience align closely with the role. If that's the case, our "
+        "recruiting team will be in touch!\n\nIn the meantime, we encourage you to learn more about Upstart's "
+        "mission and set up job alerts on our Careers page to stay connected on future opportunities.\n\nThanks "
+        "again for your interest in Upstart - we appreciate your time and look forward to the possibility of "
+        "working together!\n\nBest,\nUpstart Recruiting\n", sent=sent)
+
+
 def duckduckgo_confirmation(sent):
     """The real one, from Ashby (Nov 7, 2026), name changed."""
     return job_mail(
