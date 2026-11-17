@@ -73,6 +73,15 @@ CONFIRMATION = _P(
 )
 RULES = [("offer", OFFER), ("rejection", REJECTION), ("interview", INTERVIEW), ("confirmation", CONFIRMATION)]
 
+# Recruiting-scam warnings mention offers ("we will never ask for your bank details before you've signed any formal
+# offer"), and so do lines saying what will never happen. Offer wording is only looked for outside such sentences.
+_WARNING = re.compile(r"\b(never|scams?|fraud\w*|impersonat\w*|phishing)\b", re.I)
+_SENTENCE = re.compile(r"[^.!?\n]+[.!?]?")
+
+
+def without_warnings(text: str) -> str:
+    return " ".join(s for s in _SENTENCE.findall(text) if not _WARNING.search(s))
+
 _ROBOT = re.compile(r"^(no-?reply|do-?not-?reply|donotreply|notifications?|notify|mailer|bounces?|news(letter)?|"
                     r"marketing|updates?|info|hello|team|support|careers?-?noreply|jobs?-?noreply|alerts?)\b", re.I)
 
@@ -148,8 +157,9 @@ def classify(mail: JobMail, *, from_ats: bool) -> Reading:
     found: dict[str, str] = {}
     text = mail.opening + "\n" + " ".join(mail.links)
     for kind, patterns in RULES:
+        target = without_warnings(text) if kind == "offer" else text
         for p in patterns:
-            m = p.search(text)
+            m = p.search(target)
             if m:
                 found[kind] = m.group(0)
                 break

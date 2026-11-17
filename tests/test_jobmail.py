@@ -15,7 +15,7 @@ from tests.conftest import router
 from tests.fake_gmail import ME, FakeGmail, reply
 from tests.job_mail_samples import (ashby_offer, ats_unknown, duckduckgo_confirmation, greenhouse_confirmation,
                                     greenhouse_rejection, job_mail, newsletter, recruiter_invite,
-                                    upstart_confirmation)
+                                    life360_confirmation, upstart_confirmation)
 
 NOW = datetime(2026, 11, 6, 19, 0, tzinfo=timezone.utc)   # Fri Nov 6, 11am in Seattle
 INBOX = ("\\Inbox",)
@@ -301,6 +301,33 @@ def test_upstart_confirmation_is_not_a_rejection():
 ])
 def test_candidates_whose_after_a_decision_is_still_a_rejection(body):
     assert _read(job_mail("Acme <no-reply@hire.lever.co>", "Your application", body, sent=NOW)).kind == "rejection"
+
+
+def test_life360_confirmation_is_not_an_offer():
+    """Its scam warning says they'll never ask for bank details "before you've received and signed any formal offer"."""
+    reading = _read(life360_confirmation(NOW))
+    assert reading.kind == "confirmation" and "offer" not in reading.kinds
+
+
+@pytest.mark.parametrize("warning", [
+    "We will never ask for payment before an offer letter is signed.",
+    "Beware of recruiting scams: fraudsters may send a fake offer of employment.",
+    "Phishing alert: we only extend an offer after interviews with our team.",
+])
+def test_offers_inside_scam_warnings_are_ignored(warning):
+    body = "Thank you for applying to Acme! Our team will review your application.\n\n" + warning
+    assert _read(job_mail("Acme <no-reply@hire.lever.co>", "Thanks for applying", body, sent=NOW)).kind == \
+        "confirmation"
+
+
+@pytest.mark.parametrize("body", [
+    "Hi Will, we're thrilled to extend you a formal offer for the Backend Engineer role! Your offer letter is "
+    "attached. As always, we will never ask you for payment.",
+    "We are pleased to offer you the position of Senior Engineer.\n\nRecruiting scams are common; we never ask for "
+    "fees.",
+])
+def test_real_offers_with_a_scam_warning_are_still_offers(body):
+    assert _read(job_mail("Dana <dana@acme.com>", "Your offer from Acme", body, sent=NOW)).kind == "offer"
 
 
 def test_duckduckgo_confirmation_finds_the_application_by_name_and_fixes_its_date(pi):

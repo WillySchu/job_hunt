@@ -69,6 +69,30 @@ def ashby_offer(sent, company="Orbit"):
                     "attached.\n", sent=sent, reply_to="talent@orbit.dev")
 
 
+def life360_confirmation(sent):
+    """The real one (Nov 2026), which an earlier rule read as an offer: its scam warning mentions a "formal offer"."""
+    return job_mail(
+        "Life360 <no-reply@life360.com>", "Thank you for your interest in Life360",
+        "Hi Will,\nThank you for your interest in Life360! Your application has been received, and we will do our "
+        "best to review it right away. If your application seems like a good fit for the Senior Software Engineer, "
+        "Verticals (AI Native) position, we will get back in touch as soon as possible.\nShould you be chosen to "
+        "move forward, please find attached a helpful interview guide to assist you in preparing for the process.\n"
+        "Please note that we are receiving an overwhelming number of qualified applicants. If we are unable to move "
+        "you forward in the process, it is not necessarily a reflection of your experience. Thank you for your "
+        "understanding!\nRegards,\n\nLife360\nPlease note: Do not reply to this email. This email is sent from an "
+        "unattended mailbox. Replies will not be read.\n\nWe're happy you're exploring opportunities with us, and we "
+        "want that experience to be a safe one. Here are some tips on how to confirm you are dealing with a real "
+        "Life360 recruiting professional.\nRecruiting Scams: What to know\nWe want to make sure you know how to "
+        "recognize genuine communication from our team. Unfortunately, recruiting scams that impersonate real "
+        "companies (including ours) have become more common.\nHere's how you'll always hear from us:\n\n"
+        "* Emails come from an address ending in @life360.com.\n* Interviews are scheduled and conducted via Zoom, "
+        "never through WhatsApp or text (you will receive text reminders for your interview, but it will never be "
+        "conducted in this manner).\n* We will never ask you to pay for equipment, training, or processing fees.\n"
+        "* We will never request your bank details or Social Security number before you've received and signed any "
+        "formal offer.\n* Without pressure to act immediately or share personal/financial information urgently.\n\n"
+        "You can also find more details on our Life360 careers page.\n", sent=sent)
+
+
 def upstart_confirmation(sent):
     """The real one (Nov 12, 2026), which an earlier rule read as a rejection."""
     return job_mail(
